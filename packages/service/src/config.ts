@@ -19,6 +19,11 @@ export interface ServiceConfig {
   searchMaxLimit: number;
   /** Seconds for Cache-Control on autocomplete and lookup responses. */
   cacheMaxAgeSeconds: number;
+  /**
+   * Origins allowed by CORS. `['*']` allows any origin (the default: the
+   * data is public and the API is read-only); an explicit list restricts it.
+   */
+  corsOrigins: string[];
   port: number;
   logLevel: LogLevel;
 }
@@ -32,6 +37,7 @@ export const DEFAULTS: ServiceConfig = {
   searchDefaultLimit: 10,
   searchMaxLimit: 50,
   cacheMaxAgeSeconds: 3600,
+  corsOrigins: ['*'],
   port: 3000,
   logLevel: 'info',
 };
@@ -53,6 +59,18 @@ function num(env: Env, name: string, fallback: number, opts: { min?: number; max
   return v;
 }
 
+/** Comma-separated list; blank entries dropped. */
+function list(env: Env, name: string, fallback: string[]): string[] {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const values = raw
+    .split(',')
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+  if (values.length === 0) throw new ConfigError(`${name} must list at least one origin`);
+  return values;
+}
+
 const LOG_LEVELS: LogLevel[] = ['debug', 'info', 'warn', 'error'];
 
 export function loadConfig(env: Env = process.env): ServiceConfig {
@@ -67,6 +85,7 @@ export function loadConfig(env: Env = process.env): ServiceConfig {
     searchDefaultLimit: num(env, 'SEARCH_DEFAULT_LIMIT', DEFAULTS.searchDefaultLimit, { min: 1, integer: true }),
     searchMaxLimit: num(env, 'SEARCH_MAX_LIMIT', DEFAULTS.searchMaxLimit, { min: 1, integer: true }),
     cacheMaxAgeSeconds: num(env, 'CACHE_MAX_AGE_SECONDS', DEFAULTS.cacheMaxAgeSeconds, { min: 0, integer: true }),
+    corsOrigins: list(env, 'CORS_ORIGINS', DEFAULTS.corsOrigins),
     port: num(env, 'PORT', DEFAULTS.port, { min: 0, max: 65535, integer: true }),
     logLevel,
   };

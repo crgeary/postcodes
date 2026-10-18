@@ -33,6 +33,7 @@ describe('config', () => {
       SEARCH_MAX_LIMIT: '20',
       PORT: '8080',
       LOG_LEVEL: 'debug',
+      CORS_ORIGINS: ' https://www.fixmycar.co.uk, https://staging.fixmycar.co.uk ,',
     });
     expect(c).toMatchObject({
       indexSource: 'https://example.test/postcodes.idx',
@@ -44,7 +45,10 @@ describe('config', () => {
       searchMaxLimit: 20,
       port: 8080,
       logLevel: 'debug',
+      corsOrigins: ['https://www.fixmycar.co.uk', 'https://staging.fixmycar.co.uk'],
     });
+    expect(loadConfig({ CORS_ORIGINS: '' }).corsOrigins).toEqual(['*']);
+    expect(() => loadConfig({ CORS_ORIGINS: ' , ' })).toThrow(ConfigError);
     expect(() => loadConfig({ POSTCODE_INDEX_REFRESH_MS: 'soon' })).toThrow(ConfigError);
     expect(() => loadConfig({ POSTCODE_INDEX_REFRESH_JITTER: '2' })).toThrow(ConfigError);
     expect(() => loadConfig({ SEARCH_DEFAULT_LIMIT: '60' })).toThrow(/exceed/);

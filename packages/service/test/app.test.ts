@@ -167,6 +167,35 @@ describe('/{postcode}', () => {
   });
 });
 
+describe('CORS', () => {
+  it('allows any origin by default and answers preflight', async () => {
+    const app = createApp(loadedHolder(), testConfig(), silentLogger);
+    const res = await app.request('/search?q=ZE', { headers: { origin: 'https://www.fixmycar.co.uk' } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    expect(res.headers.get('access-control-expose-headers')).toContain('x-request-id');
+
+    const preflight = await app.request('/search?q=ZE', {
+      method: 'OPTIONS',
+      headers: { origin: 'https://www.fixmycar.co.uk', 'access-control-request-method': 'GET' },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-origin')).toBe('*');
+    expect(preflight.headers.get('access-control-allow-methods')).toContain('GET');
+    expect(preflight.headers.get('access-control-max-age')).toBe('86400');
+  });
+
+  it('restricts to the configured origins when a list is given', async () => {
+    const app = createApp(loadedHolder(), testConfig({ corsOrigins: ['https://www.fixmycar.co.uk', 'https://staging.fixmycar.co.uk'] }), silentLogger);
+    const ok = await app.request('/ZE1%200AA', { headers: { origin: 'https://staging.fixmycar.co.uk' } });
+    expect(ok.headers.get('access-control-allow-origin')).toBe('https://staging.fixmycar.co.uk');
+    expect(ok.headers.get('vary')).toContain('Origin');
+    const other = await app.request('/ZE1%200AA', { headers: { origin: 'https://evil.example' } });
+    expect(other.status).toBe(200);
+    expect(other.headers.get('access-control-allow-origin')).toBeNull();
+  });
+});
+
 describe('/openapi.json', () => {
   it('serves a valid OpenAPI 3.1 document describing the four routes and error shapes', async () => {
     const app = createApp(loadedHolder(), testConfig(), silentLogger);

@@ -98,6 +98,7 @@ Interactive documentation is at `/docs`; the OpenAPI 3.1 document is at `/openap
 | `POSTCODE_INDEX_FETCH_TIMEOUT_MS` | `30000` | Per-fetch timeout for URL sources. |
 | `SEARCH_DEFAULT_LIMIT` / `SEARCH_MAX_LIMIT` | `10` / `50` | Result caps. |
 | `CACHE_MAX_AGE_SECONDS` | `3600` | `Cache-Control` on autocomplete and lookup responses. |
+| `CORS_ORIGINS` | `*` | Comma-separated origins allowed to call the API from a browser. `*` allows any; list specific origins to restrict. |
 | `PORT` | `3000` | Listen port. |
 | `LOG_LEVEL` | `info` | `debug` also logs every hot-path request. |
 
@@ -111,6 +112,8 @@ Interactive documentation is at `/docs`; the OpenAPI 3.1 document is at `/openap
 | `GET /openapi.json` | none | OpenAPI 3.1 document. |
 
 The lookup route lives at the root, so it only matches segments that look like a postcode: 5 to 8 letters, digits and spaces including at least one digit. Anything else (`/favicon.ico`, `/metrics`) is an unknown route and gets the JSON 404. New literal routes must not be postcode-shaped; the existing ones (`/health`, `/openapi.json`, `/docs`) are registered first and are not.
+
+**CORS.** Browsers may call the API directly; every response carries `Access-Control-Allow-Origin` for the configured origins (any origin by default, since the data is public and the API is read-only) and preflight requests are answered with a one-day cache. Set `CORS_ORIGINS` to restrict it.
 
 **Response envelope.** Every successful response puts its payload under `data`: a list for search, an object for lookup and health. Every error puts its detail under `error`:
 

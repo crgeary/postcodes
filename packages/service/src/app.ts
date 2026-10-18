@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import type { ServiceConfig } from './config.js';
 import type { IndexHolder } from './holder.js';
 import type { Logger } from './logger.js';
@@ -61,6 +62,16 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
   const cacheHeader = { 'Cache-Control': { description: 'Results change at most quarterly', schema: { type: 'string' as const } } };
 
   app.use(requestLogging(logger, OPS_PATHS));
+  // Browsers call this API directly from autocomplete widgets, so CORS is on
+  // by default. GET only; the request id is exposed so clients can quote it.
+  app.use(
+    cors({
+      origin: config.corsOrigins.includes('*') ? '*' : config.corsOrigins,
+      allowMethods: ['GET', 'HEAD', 'OPTIONS'],
+      exposeHeaders: ['x-request-id'],
+      maxAge: 86_400,
+    }),
+  );
 
   app.get(
     '/search',
