@@ -1,0 +1,31 @@
+{
+  "name": "@postcode/service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hono service answering postcode autocomplete and lookup from a binary index",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "dev": "node --conditions=development --import tsx src/server.ts",
+    "start": "node --max-old-space-size=128 dist/server.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.5",
+    "@postcode/index-format": "workspace:*",
+    "hono": "^4.13.13",
+    "hono-openapi": "1.5.0",
+    "zod": "^4.6.7"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@apidevtools/swagger-parser": "^13.1.0"
+  }
+}

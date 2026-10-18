@@ -12,5 +12,8 @@ export default defineConfig({
   test: {
     include: ['packages/*/test/**/*.test.ts'],
     testTimeout: 30_000,
+    pool: 'forks',
+    // The refresh test checks that old index buffers are released after GC.
+    execArgv: ['--expose-gc'],
   },
 });

@@ -1,0 +1,163 @@
+import SwaggerParser from '@apidevtools/swagger-parser';
+import { PostcodeIndex } from '@postcode/index-format';
+import { describe, expect, it } from 'vitest';
+import { createApp } from '../src/app.js';
+import { IndexHolder } from '../src/holder.js';
+import { silentLogger } from '../src/logger.js';
+import { ErrorSchema, HealthSchema } from '../src/schemas.js';
+import { fixtureBytes, testConfig } from './helpers.js';
+
+function loadedHolder(): IndexHolder {
+  const holder = new IndexHolder();
+  holder.swap(PostcodeIndex.fromBytes(fixtureBytes()), {
+    source: '/tmp/ze.idx',
+    sourceKind: 'file',
+    loadedAt: '2026-10-18T12:00:00.000Z',
+    fallback: false,
+  });
+  return holder;
+}
+
+describe('/health', () => {
+  it('returns 503 before an index is loaded and 200 after', async () => {
+    const holder = new IndexHolder();
+    const app = createApp(holder, testConfig(), silentLogger);
+    const before = await app.request('/health');
+    expect(before.status).toBe(503);
+    const bodyBefore = HealthSchema.parse(await before.json());
+    expect(bodyBefore).toMatchObject({ status: 'starting', ready: false, index: null });
+
+    holder.swap(PostcodeIndex.fromBytes(fixtureBytes()), {
+      source: 'file.idx',
+      sourceKind: 'file',
+      loadedAt: '2026-10-18T12:00:00.000Z',
+      fallback: true,
+    });
+    const after = await app.request('/health');
+    expect(after.status).toBe(200);
+    expect(after.headers.get('cache-control')).toBe('no-store');
+    const body = HealthSchema.parse(await after.json());
+    expect(body).toMatchObject({
+      status: 'ok',
+      ready: true,
+      index: { release: 'FEB_2026', postcodes: 658, districts: 3, source: 'file.idx', fallback: true, exclusions: [] },
+      refresh: { enabled: false, lastError: null },
+    });
+    expect(body.memory.arrayBuffers).toBeGreaterThan(0);
+  });
+});
+
+describe('/postcodes/autocomplete', () => {
+  const app = createApp(loadedHolder(), testConfig(), silentLogger);
+
+  it('returns results with the space, coordinates and a cache header', async () => {
+    const res = await app.request('/postcodes/autocomplete?q=ze1%200a&limit=3');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('public, max-age=3600');
+    expect(res.headers.get('x-request-id')).toMatch(/[0-9a-f-]{36}/);
+    const body = (await res.json()) as { results: Array<{ postcode: string; lat: number; lon: number }> };
+    expect(body.results.length).toBe(3);
+    expect(body.results[0]).toEqual({ postcode: 'ZE1 0AA', lat: expect.any(Number), lon: expect.any(Number) });
+    expect(body.results[0].lat).toBeCloseTo(60.153231, 4);
+  });
+
+  it('applies the default and maximum limits', async () => {
+    const def = (await (await app.request('/postcodes/autocomplete?q=ZE')).json()) as { results: unknown[] };
+    expect(def.results.length).toBe(10);
+    const max = (await (await app.request('/postcodes/autocomplete?q=ZE&limit=50')).json()) as { results: unknown[] };
+    expect(max.results.length).toBe(50);
+  });
+
+  it('returns an empty list, not 404, when nothing matches', async () => {
+    const res = await app.request('/postcodes/autocomplete?q=SW1A');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ results: [] });
+  });
+
+  it('returns 400 in the documented shape for bad parameters', async () => {
+    for (const qs of ['', 'q=', 'q=ZE1%200AA%200', 'q=ZE&limit=0', 'q=ZE&limit=51', 'q=ZE&limit=abc', 'q=ZE&limit=1.5']) {
+      const res = await app.request(`/postcodes/autocomplete?${qs}`);
+      expect(res.status, qs).toBe(400);
+      expect(res.headers.get('cache-control')).toBeNull();
+      const body = ErrorSchema.parse(await res.json());
+      expect(body.error).toBe('bad_request');
+      expect(body.issues!.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('echoes a supplied request id', async () => {
+    const res = await app.request('/postcodes/autocomplete?q=ZE', { headers: { 'x-request-id': 'abc-123' } });
+    expect(res.headers.get('x-request-id')).toBe('abc-123');
+  });
+
+  it('returns 503 while no index is held', async () => {
+    const empty = createApp(new IndexHolder(), testConfig(), silentLogger);
+    const res = await empty.request('/postcodes/autocomplete?q=ZE');
+    expect(res.status).toBe(503);
+    expect(ErrorSchema.parse(await res.json()).error).toBe('not_ready');
+  });
+});
+
+describe('/postcodes/{postcode}', () => {
+  const app = createApp(loadedHolder(), testConfig({ cacheMaxAgeSeconds: 60 }), silentLogger);
+
+  it('looks up with or without the space, any case', async () => {
+    for (const p of ['ZE1 0AA', 'ze10aa', 'ZE1%200AA']) {
+      const res = await app.request(`/postcodes/${p}`);
+      expect(res.status, p).toBe(200);
+      expect(res.headers.get('cache-control')).toBe('public, max-age=60');
+      expect(await res.json()).toEqual({ postcode: 'ZE1 0AA', lat: expect.any(Number), lon: expect.any(Number) });
+    }
+  });
+
+  it('returns 404 in the documented shape for an unknown postcode', async () => {
+    const res = await app.request('/postcodes/ZE1%200ZZ');
+    expect(res.status).toBe(404);
+    expect(ErrorSchema.parse(await res.json())).toEqual({ error: 'not_found' });
+  });
+
+  it('returns 400 for a malformed postcode', async () => {
+    const res = await app.request('/postcodes/ZE1');
+    expect(res.status).toBe(400);
+    expect(ErrorSchema.parse(await res.json()).error).toBe('bad_request');
+  });
+
+  it('unknown routes return a JSON 404', async () => {
+    const res = await app.request('/nope');
+    expect(res.status).toBe(404);
+    expect(ErrorSchema.parse(await res.json()).error).toBe('not_found');
+  });
+});
+
+describe('/openapi.json', () => {
+  it('serves a valid OpenAPI 3.1 document describing the four routes and error shapes', async () => {
+    const app = createApp(loadedHolder(), testConfig(), silentLogger);
+    const res = await app.request('/openapi.json');
+    expect(res.status).toBe(200);
+    const spec = (await res.json()) as Record<string, any>;
+    expect(spec.openapi).toBe('3.1.0');
+    expect(spec.info.title).toContain('Postcode');
+    expect(Object.keys(spec.paths).sort()).toEqual(['/health', '/postcodes/autocomplete', '/postcodes/{postcode}']);
+    const auto = spec.paths['/postcodes/autocomplete'].get;
+    expect(Object.keys(auto.responses).sort()).toEqual(['200', '400', '503']);
+    expect(auto.responses['200'].headers['Cache-Control']).toBeDefined();
+    const lookup = spec.paths['/postcodes/{postcode}'].get;
+    expect(Object.keys(lookup.responses).sort()).toEqual(['200', '400', '404', '503']);
+    expect(spec.components.schemas).toHaveProperty('Result');
+    expect(spec.components.schemas).toHaveProperty('Error');
+    expect(spec.components.schemas.Error.properties.error.enum).toEqual(['bad_request', 'not_found', 'not_ready']);
+    const qParam = auto.parameters.find((p: { name: string }) => p.name === 'q');
+    expect(qParam).toMatchObject({ in: 'query', required: true, schema: { type: 'string', minLength: 1, maxLength: 8 } });
+
+    // Validate the document against the OpenAPI 3.1 schema.
+    await expect(SwaggerParser.validate(structuredClone(spec))).resolves.toBeDefined();
+  });
+
+  it('/docs serves an HTML page pointing at the spec', async () => {
+    const app = createApp(loadedHolder(), testConfig(), silentLogger);
+    const res = await app.request('/docs');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(await res.text()).toContain('/openapi.json');
+  });
+});
