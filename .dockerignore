@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+**/dist
+bench-data
+.git
+.github
+*.log
+.DS_Store
+PLAN.md

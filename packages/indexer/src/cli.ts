@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { build } from './build.js';
 import { inspect } from './inspect.js';
@@ -107,7 +108,7 @@ async function runInspect(argv: string[]): Promise<number> {
   return 0;
 }
 
-const isEntry = process.argv[1] !== undefined && import.meta.url === new URL(`file://${process.argv[1]}`).href;
+const isEntry = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isEntry) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
