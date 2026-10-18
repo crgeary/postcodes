@@ -40,6 +40,16 @@ docker build -t postcode-service --build-arg BUNDLE_INDEX=1 .
 
 The image runs as `node` with `--max-old-space-size=128`. The index lives off-heap in a single `ArrayBuffer`, so the V8 heap only holds request-scoped garbage; `/health` reports `memory.arrayBuffers`, which should sit within a few hundred KB of `index.bytes`. If it grows across refreshes an old index is being retained somewhere.
 
+## Shutdown and rolling deploys
+
+On SIGTERM or SIGINT the service does not close immediately:
+
+1. Readiness flips off: `/health` returns 503 with `status: "draining"`, while search and lookup keep answering. A load balancer or orchestrator polling `/health` stops routing new requests here.
+2. After `SHUTDOWN_DRAIN_MS` (default 5 s) the refresh timer stops and the listener closes, waiting up to 10 s for in-flight requests.
+3. The process exits 0. A second signal during the drain exits at once.
+
+Set the orchestrator's termination grace period above `SHUTDOWN_DRAIN_MS` plus 10 s, and its readiness probe interval below the drain window, so the drain is long enough to be noticed.
+
 ## Refresh
 
 With `POSTCODE_INDEX_REFRESH_MS` above zero the service sleeps `interval × (1 ± jitter)` and then:
@@ -76,7 +86,7 @@ To publish a new index for fetched mode, upload the file to the index host with 
 
 | Field | Meaning |
 | --- | --- |
-| `status`, `ready` | `ok`/`true` once an index is held; 503 with `starting`/`false` before. |
+| `status`, `ready` | `ok`/`true` once an index is held; 503 with `starting`/`false` before, and 503 with `draining`/`false` once shutdown has begun. |
 | `index.release`, `index.builtAt` | From the index metadata, written by the indexer. |
 | `index.postcodes`, `index.districts`, `index.exclusions` | What is being served and which exclusion flags were applied at build. |
 | `index.source`, `index.fallback`, `index.loadedAt` | Where the current index came from. |

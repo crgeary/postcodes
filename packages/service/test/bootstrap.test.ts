@@ -33,6 +33,7 @@ describe('config', () => {
       SEARCH_DEFAULT_LIMIT: '5',
       SEARCH_MAX_LIMIT: '20',
       PORT: '8080',
+      SHUTDOWN_DRAIN_MS: '2500',
       LOG_LEVEL: 'debug',
       CORS_ORIGINS: ' https://www.fixmycar.co.uk, https://staging.fixmycar.co.uk ,',
     });
@@ -46,6 +47,7 @@ describe('config', () => {
       searchDefaultLimit: 5,
       searchMaxLimit: 20,
       port: 8080,
+      shutdownDrainMs: 2500,
       logLevel: 'debug',
       corsOrigins: ['https://www.fixmycar.co.uk', 'https://staging.fixmycar.co.uk'],
     });

@@ -104,7 +104,7 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
     describeRoute({
       tags: ['ops'],
       summary: 'Readiness and index metadata',
-      description: '503 until an index is held, so orchestrators can gate traffic on it.',
+      description: '503 until an index is held and again once shutdown begins, so orchestrators can gate traffic on it.',
       responses: {
         200: jsonResponse('Ready', HealthResponseSchema),
         503: jsonResponse('Not ready; the same document, so the diagnostics are available', HealthResponseSchema),
@@ -114,9 +114,10 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
       const index = holder.current;
       const info = holder.info;
       const mem = process.memoryUsage();
+      const ready = holder.ready;
       const body: Health = {
-        status: index ? 'ok' : 'starting',
-        ready: index !== null,
+        status: holder.draining ? 'draining' : index ? 'ok' : 'starting',
+        ready,
         index:
           index && info
             ? {
@@ -136,7 +137,7 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
         memory: { arrayBuffers: mem.arrayBuffers, rss: mem.rss, heapUsed: mem.heapUsed },
       };
       c.header('Cache-Control', 'no-store');
-      return c.json({ data: body }, index ? 200 : 503);
+      return c.json({ data: body }, ready ? 200 : 503);
     },
   );
 

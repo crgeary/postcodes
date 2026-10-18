@@ -50,8 +50,21 @@ export class IndexHolder {
     return this.indexInfo;
   }
 
+  private drainingFlag = false;
+
+  /** True once shutdown has begun: /health reports 503 while requests are still served. */
+  get draining(): boolean {
+    return this.drainingFlag;
+  }
+
+  /** Ready for traffic: an index is held and shutdown has not begun. */
   get ready(): boolean {
-    return this.index !== null;
+    return this.index !== null && !this.drainingFlag;
+  }
+
+  /** Flip readiness off so load balancers stop routing here before the server closes. */
+  beginDrain(): void {
+    this.drainingFlag = true;
   }
 
   /** Atomically replace the index. In-flight requests keep their old reference. */

@@ -3,6 +3,7 @@ import { createApp } from './app.js';
 import { bootstrap } from './bootstrap.js';
 import { loadConfig } from './config.js';
 import { createLogger } from './logger.js';
+import { createShutdown } from './shutdown.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -12,14 +13,15 @@ async function main(): Promise<void> {
   const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
     logger.info('listening', { port: info.port, refreshMs: config.refreshMs, source: config.indexSource });
   });
-  const shutdown = (signal: string): void => {
-    logger.info('shutting down', { signal });
-    refresh.stop();
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 5000).unref();
-  };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  const shutdown = createShutdown({
+    holder,
+    refresh,
+    logger,
+    drainMs: config.shutdownDrainMs,
+    close: () => new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+  });
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 }
 
 main().catch((err) => {

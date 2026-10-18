@@ -101,6 +101,7 @@ Interactive documentation is at `/docs`; the OpenAPI 3.1 document is at `/openap
 | `CACHE_MAX_AGE_SECONDS` | `3600` | `Cache-Control` on autocomplete and lookup responses. |
 | `CORS_ORIGINS` | `*` | Comma-separated origins allowed to call the API from a browser. `*` allows any; list specific origins to restrict. |
 | `PORT` | `3000` | Listen port. |
+| `SHUTDOWN_DRAIN_MS` | `5000` | After SIGTERM, how long `/health` reports 503 while requests are still served, before the listener closes. `0` closes at once. |
 | `LOG_LEVEL` | `info` | `debug` also logs every hot-path request. |
 
 ### API
@@ -109,7 +110,7 @@ Interactive documentation is at `/docs`; the OpenAPI 3.1 document is at `/openap
 | --- | --- | --- |
 | `GET /search` | `q` (1 to 8 characters after normalisation, required), `limit` (1 to 50, default 10) | `{ data: [{ postcode, lat?, lon? }] }`. Empty list when nothing matches; 400 on invalid parameters. |
 | `GET /{postcode}` | Full postcode, space optional, any case | `{ data: { postcode, lat?, lon? } }`, 400 if the segment is not a complete postcode, 404 if unknown. |
-| `GET /health` | none | `{ data: { status, ready, index, refresh, memory } }`. 503 with the same document until an index is loaded. |
+| `GET /health` | none | `{ data: { status, ready, index, refresh, memory } }`. 503 with the same document until an index is loaded (`starting`) and again once shutdown begins (`draining`). |
 | `GET /openapi.json` | none | OpenAPI 3.1 document. |
 
 The lookup route lives at the root, so it only matches segments that look like a postcode: 5 to 8 letters, digits and spaces including at least one digit. Anything else (`/favicon.ico`, `/metrics`) is an unknown route and gets the JSON 404. New literal routes must not be postcode-shaped; the existing ones (`/health`, `/openapi.json`, `/docs`) are registered first and are not.

@@ -87,7 +87,7 @@ export const LookupParamSchema = z.object({
 
 export const HealthSchema = z
   .object({
-    status: z.enum(['ok', 'starting']),
+    status: z.enum(['ok', 'starting', 'draining']).meta({ description: 'draining: shutdown has begun; requests are still served but new traffic should go elsewhere' }),
     ready: z.boolean(),
     index: z
       .object({

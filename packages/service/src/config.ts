@@ -27,6 +27,8 @@ export interface ServiceConfig {
    */
   corsOrigins: string[];
   port: number;
+  /** How long to keep serving with readiness off after SIGTERM before closing. */
+  shutdownDrainMs: number;
   logLevel: LogLevel;
 }
 
@@ -42,6 +44,7 @@ export const DEFAULTS: ServiceConfig = {
   cacheMaxAgeSeconds: 3600,
   corsOrigins: ['*'],
   port: 3000,
+  shutdownDrainMs: 5000,
   logLevel: 'info',
 };
 
@@ -91,6 +94,7 @@ export function loadConfig(env: Env = process.env): ServiceConfig {
     cacheMaxAgeSeconds: num(env, 'CACHE_MAX_AGE_SECONDS', DEFAULTS.cacheMaxAgeSeconds, { min: 0, integer: true }),
     corsOrigins: list(env, 'CORS_ORIGINS', DEFAULTS.corsOrigins),
     port: num(env, 'PORT', DEFAULTS.port, { min: 0, max: 65535, integer: true }),
+    shutdownDrainMs: num(env, 'SHUTDOWN_DRAIN_MS', DEFAULTS.shutdownDrainMs, { min: 0, integer: true }),
     logLevel,
   };
   if (config.searchDefaultLimit > config.searchMaxLimit) {
