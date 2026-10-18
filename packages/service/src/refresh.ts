@@ -42,6 +42,7 @@ export function createRefresh(holder: IndexHolder, config: ServiceConfig, logger
       const result = await loadSource(config.indexSource, {
         previous,
         timeoutMs: config.fetchTimeoutMs,
+        maxBytes: config.fetchMaxBytes,
         fetchImpl: deps.fetchImpl,
       });
       state.lastSuccessAt = new Date().toISOString();

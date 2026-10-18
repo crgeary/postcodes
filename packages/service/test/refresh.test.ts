@@ -143,14 +143,20 @@ describe('refresh memory', () => {
       const { holder, refresh } = await bootstrap(testConfig({ indexSource: host.url }), captureLogger().logger);
       refresh.stop();
       const indexBytes = holder.current!.byteLength;
-      gc!();
+      // Two passes: ArrayBuffer backing stores are released by finalisers,
+      // which can need a second cycle after the owning objects die.
+      const collect = () => {
+        gc!();
+        gc!();
+      };
+      collect();
       const baseline = process.memoryUsage().arrayBuffers;
       let peak = 0;
       for (let i = 1; i <= 10; i++) {
         host.setBody(fixtureBytes({ dropFirst: i }), `"v${i}"`);
         await refresh.runOnce();
         expect(holder.current!.postcodeCount).toBe(658 - i);
-        gc!();
+        collect();
         peak = Math.max(peak, process.memoryUsage().arrayBuffers - baseline);
       }
       // Only the current index should remain; allow one extra copy for anything in flight.

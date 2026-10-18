@@ -8,6 +8,8 @@ export interface LoadOptions {
   /** Info from the previous load of the same source, for conditional loads. */
   previous?: LoadedIndexInfo | null;
   timeoutMs: number;
+  /** Reject URL bodies larger than this before (Content-Length) or while (streaming) reading them. */
+  maxBytes?: number;
   fallback?: boolean;
   fetchImpl?: typeof fetch;
 }
@@ -46,10 +48,57 @@ export function loadFromFile(path: string, options: LoadOptions): LoadResult {
   };
 }
 
+/** Default ceiling for a downloaded index: several times the full UK size. */
+export const DEFAULT_MAX_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Read a response body into one ArrayBuffer without ever holding more than
+ * `maxBytes`. A declared Content-Length above the cap is rejected before any
+ * byte is read. With an acceptable declared length the body is read with
+ * `arrayBuffer()`, which releases its internal chunks immediately; only an
+ * undeclared length is streamed, with the read aborted as soon as it passes
+ * the cap. A body that disagrees with its declared length is rejected.
+ */
+export async function readBodyCapped(response: Response, maxBytes: number): Promise<ArrayBuffer> {
+  const declared = response.headers.get('content-length');
+  if (declared !== null) {
+    const expected = Number(declared);
+    if (!Number.isInteger(expected) || expected < 0) throw new LoadError(`invalid Content-Length ${JSON.stringify(declared)}`);
+    if (expected > maxBytes) throw new LoadError(`index is ${expected} bytes, above the ${maxBytes} byte limit`);
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength !== expected) {
+      throw new LoadError(`index download was ${buffer.byteLength} bytes but Content-Length said ${expected}`);
+    }
+    return buffer;
+  }
+  if (response.body === null) return new ArrayBuffer(0);
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new LoadError(`index download exceeded the ${maxBytes} byte limit`);
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(new ArrayBuffer(total));
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out.buffer;
+}
+
 /**
  * URL source. Sends If-None-Match / If-Modified-Since from the previous
- * response; a 304 ends the cycle with no download. The body is read as an
- * ArrayBuffer and never converted to a string.
+ * response; a 304 ends the cycle with no download. The body is read into an
+ * ArrayBuffer under a size cap and never converted to a string.
  */
 export async function loadFromUrl(url: string, options: LoadOptions): Promise<LoadResult> {
   const headers = new Headers({ accept: 'application/octet-stream' });
@@ -62,7 +111,7 @@ export async function loadFromUrl(url: string, options: LoadOptions): Promise<Lo
   const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(options.timeoutMs) });
   if (response.status === 304) return { kind: 'unchanged' };
   if (!response.ok) throw new LoadError(`${url}: HTTP ${response.status}`);
-  const buffer = await response.arrayBuffer();
+  const buffer = await readBodyCapped(response, options.maxBytes ?? DEFAULT_MAX_BYTES);
   const index = PostcodeIndex.fromBuffer(buffer);
   return {
     kind: 'loaded',

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { bootstrap } from '../src/bootstrap.js';
 import { ConfigError, DEFAULTS, loadConfig } from '../src/config.js';
-import { loadFromFile, sourceKind } from '../src/loaders.js';
+import { loadFromFile, loadFromUrl, sourceKind } from '../src/loaders.js';
 import { createLogger } from '../src/logger.js';
 import { corrupt, fixtureBytes, startIndexHost, tempFile, testConfig } from './helpers.js';
 
@@ -29,6 +29,7 @@ describe('config', () => {
       POSTCODE_INDEX_REFRESH_MS: '3600000',
       POSTCODE_INDEX_REFRESH_JITTER: '0.2',
       POSTCODE_INDEX_FETCH_TIMEOUT_MS: '5000',
+      POSTCODE_INDEX_MAX_BYTES: '20000000',
       SEARCH_DEFAULT_LIMIT: '5',
       SEARCH_MAX_LIMIT: '20',
       PORT: '8080',
@@ -41,6 +42,7 @@ describe('config', () => {
       refreshMs: 3_600_000,
       refreshJitter: 0.2,
       fetchTimeoutMs: 5000,
+      fetchMaxBytes: 20_000_000,
       searchDefaultLimit: 5,
       searchMaxLimit: 20,
       port: 8080,
@@ -119,6 +121,66 @@ describe('bootstrap', () => {
       );
       refresh.stop();
       expect(holder.info).toMatchObject({ source: good, fallback: true });
+    } finally {
+      await host.close();
+    }
+  });
+
+  it('rejects a URL body larger than the cap before or while reading it', async () => {
+    const bytes = fixtureBytes();
+    const stream = (chunks: Uint8Array[]) =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const c of chunks) controller.enqueue(c);
+          controller.close();
+        },
+      });
+    const fetchWith = (body: BodyInit | null, headers: Record<string, string> = {}): typeof fetch =>
+      (async () => new Response(body, { status: 200, headers })) as unknown as typeof fetch;
+
+    // Declared too large: rejected from the header alone. A body that throws
+    // when read proves the stream was never consumed.
+    const poison = new ReadableStream<Uint8Array>({
+      pull() {
+        throw new Error('body was read despite oversized Content-Length');
+      },
+    });
+    await expect(
+      loadFromUrl('http://x/p.idx', { timeoutMs: 1000, maxBytes: 1000, fetchImpl: fetchWith(poison, { 'content-length': '5000' }) }),
+    ).rejects.toThrow(/above the 1000 byte limit/);
+
+    // No Content-Length, streamed past the cap: rejected mid-stream.
+    const big = new Uint8Array(3000);
+    await expect(
+      loadFromUrl('http://x/p.idx', { timeoutMs: 1000, maxBytes: 1000, fetchImpl: fetchWith(stream([big.subarray(0, 500), big.subarray(500, 1500), big.subarray(1500)])) }),
+    ).rejects.toThrow(/exceeded the 1000 byte limit/);
+
+    // Lying Content-Length: rejected.
+    await expect(
+      loadFromUrl('http://x/p.idx', { timeoutMs: 1000, maxBytes: 1 << 20, fetchImpl: fetchWith(stream([bytes]), { 'content-length': String(bytes.byteLength - 1) }) }),
+    ).rejects.toThrow(/Content-Length said/);
+
+    // A valid chunked body under the cap loads, byte-exact.
+    const half = bytes.byteLength >> 1;
+    const ok = await loadFromUrl('http://x/p.idx', {
+      timeoutMs: 1000,
+      maxBytes: 1 << 20,
+      fetchImpl: fetchWith(stream([bytes.subarray(0, half), bytes.subarray(half)])),
+    });
+    expect(ok.kind).toBe('loaded');
+    if (ok.kind === 'loaded') expect(ok.index.postcodeCount).toBe(658);
+  });
+
+  it('refresh records an oversized download as lastError and keeps serving', async () => {
+    const host = await startIndexHost(fixtureBytes(), '"v1"');
+    try {
+      const { holder, refresh } = await bootstrap(testConfig({ indexSource: host.url, fetchMaxBytes: 1 << 20 }), captureLogger().logger);
+      refresh.stop();
+      host.setBody(new Uint8Array(2 << 20), '"v2"');
+      await refresh.runOnce();
+      expect(holder.ready).toBe(true);
+      expect(holder.current!.postcodeCount).toBe(658);
+      expect(holder.refresh.lastError).toMatch(/byte limit/);
     } finally {
       await host.close();
     }

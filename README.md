@@ -96,6 +96,7 @@ Interactive documentation is at `/docs`; the OpenAPI 3.1 document is at `/openap
 | `POSTCODE_INDEX_REFRESH_MS` | `0` | Refresh interval; `0` disables. Applies to both source kinds. |
 | `POSTCODE_INDEX_REFRESH_JITTER` | `0.1` | Fraction of the interval randomised each cycle. |
 | `POSTCODE_INDEX_FETCH_TIMEOUT_MS` | `30000` | Per-fetch timeout for URL sources. |
+| `POSTCODE_INDEX_MAX_BYTES` | `67108864` (64 MiB) | Largest index download accepted from a URL. Larger bodies are rejected before or while reading, never buffered whole. |
 | `SEARCH_DEFAULT_LIMIT` / `SEARCH_MAX_LIMIT` | `10` / `50` | Result caps. |
 | `CACHE_MAX_AGE_SECONDS` | `3600` | `Cache-Control` on autocomplete and lookup responses. |
 | `CORS_ORIGINS` | `*` | Comma-separated origins allowed to call the API from a browser. `*` allows any; list specific origins to restrict. |

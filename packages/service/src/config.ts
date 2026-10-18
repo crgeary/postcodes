@@ -15,6 +15,8 @@ export interface ServiceConfig {
   refreshJitter: number;
   /** Per-fetch timeout for URL sources. */
   fetchTimeoutMs: number;
+  /** Largest index download accepted from a URL source, in bytes. */
+  fetchMaxBytes: number;
   searchDefaultLimit: number;
   searchMaxLimit: number;
   /** Seconds for Cache-Control on autocomplete and lookup responses. */
@@ -34,6 +36,7 @@ export const DEFAULTS: ServiceConfig = {
   refreshMs: 0,
   refreshJitter: 0.1,
   fetchTimeoutMs: 30_000,
+  fetchMaxBytes: 64 * 1024 * 1024,
   searchDefaultLimit: 10,
   searchMaxLimit: 50,
   cacheMaxAgeSeconds: 3600,
@@ -82,6 +85,7 @@ export function loadConfig(env: Env = process.env): ServiceConfig {
     refreshMs: num(env, 'POSTCODE_INDEX_REFRESH_MS', DEFAULTS.refreshMs, { min: 0, integer: true }),
     refreshJitter: num(env, 'POSTCODE_INDEX_REFRESH_JITTER', DEFAULTS.refreshJitter, { min: 0, max: 1 }),
     fetchTimeoutMs: num(env, 'POSTCODE_INDEX_FETCH_TIMEOUT_MS', DEFAULTS.fetchTimeoutMs, { min: 1, integer: true }),
+    fetchMaxBytes: num(env, 'POSTCODE_INDEX_MAX_BYTES', DEFAULTS.fetchMaxBytes, { min: 1, integer: true }),
     searchDefaultLimit: num(env, 'SEARCH_DEFAULT_LIMIT', DEFAULTS.searchDefaultLimit, { min: 1, integer: true }),
     searchMaxLimit: num(env, 'SEARCH_MAX_LIMIT', DEFAULTS.searchMaxLimit, { min: 1, integer: true }),
     cacheMaxAgeSeconds: num(env, 'CACHE_MAX_AGE_SECONDS', DEFAULTS.cacheMaxAgeSeconds, { min: 0, integer: true }),

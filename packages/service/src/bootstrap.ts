@@ -16,7 +16,7 @@ export interface Bootstrapped {
  */
 export async function bootstrap(config: ServiceConfig, logger: Logger, deps: RefreshDeps = {}): Promise<Bootstrapped> {
   const holder = new IndexHolder();
-  const loadOptions = { timeoutMs: config.fetchTimeoutMs, fetchImpl: deps.fetchImpl };
+  const loadOptions = { timeoutMs: config.fetchTimeoutMs, maxBytes: config.fetchMaxBytes, fetchImpl: deps.fetchImpl };
   try {
     const result = await loadSource(config.indexSource, loadOptions);
     if (result.kind !== 'loaded') throw new Error('unexpected unchanged result on first load');

@@ -45,7 +45,7 @@ The image runs as `node` with `--max-old-space-size=128`. The index lives off-he
 With `POSTCODE_INDEX_REFRESH_MS` above zero the service sleeps `interval × (1 ± jitter)` and then:
 
 1. File source: compares mtime and size; skips if unchanged. URL source: sends `If-None-Match` / `If-Modified-Since`; a 304 ends the cycle.
-2. Reads or downloads, validates magic, format version, length and SHA-256, and constructs a new index.
+2. Reads or downloads (rejecting any body above `POSTCODE_INDEX_MAX_BYTES` before buffering it), validates magic, format version, length and SHA-256, and constructs a new index.
 3. Swaps it in. In-flight requests finish on the old index, which is then collected.
 4. On any error: logs, sets `health.refresh.lastError`, keeps serving the current index. Readiness never flips.
 
