@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+# Built index files are large and rebuilt per release; only committed fixtures are kept.
+*.idx
+!fixtures/**/*.idx
+# Synthetic benchmark fixture
+bench-data/
+coverage/

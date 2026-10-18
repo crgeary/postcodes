@@ -1,0 +1,26 @@
+{
+  "name": "postcode-autocomplete",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "UK postcode autocomplete: ONSPD indexer and Hono service",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.15.1",
+  "scripts": {
+    "build": "pnpm -r --filter './packages/*' run build",
+    "test": "vitest run",
+    "typecheck": "pnpm -r --filter './packages/*' run typecheck",
+    "lint": "bash scripts/check-no-async.sh",
+    "bench": "pnpm --filter @postcode/index-format run bench",
+    "check": "pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "tsx": "^4.23.0",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.0"
+  }
+}
