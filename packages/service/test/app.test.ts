@@ -47,11 +47,11 @@ describe('/health', () => {
   });
 });
 
-describe('/postcodes/autocomplete', () => {
+describe('/search', () => {
   const app = createApp(loadedHolder(), testConfig(), silentLogger);
 
   it('returns results with the space, coordinates and a cache header', async () => {
-    const res = await app.request('/postcodes/autocomplete?q=ze1%200a&limit=3');
+    const res = await app.request('/search?q=ze1%200a&limit=3');
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('public, max-age=3600');
     expect(res.headers.get('x-request-id')).toMatch(/[0-9a-f-]{36}/);
@@ -62,15 +62,15 @@ describe('/postcodes/autocomplete', () => {
   });
 
   it('applies the default and maximum limits', async () => {
-    const def = (await (await app.request('/postcodes/autocomplete?q=ZE')).json()) as { results: unknown[] };
+    const def = (await (await app.request('/search?q=ZE')).json()) as { results: unknown[] };
     expect(def.results.length).toBe(10);
-    const max = (await (await app.request('/postcodes/autocomplete?q=ZE&limit=50')).json()) as { results: unknown[] };
+    const max = (await (await app.request('/search?q=ZE&limit=50')).json()) as { results: unknown[] };
     expect(max.results.length).toBe(50);
   });
 
   it('accepts input that only normalises to a valid query (leading, trailing and doubled spaces)', async () => {
     for (const q of ['%20ze1%200aa', 'ZE1%200AA%20', 'ze1%20%200aa', '%20%20ZE1%20%200AA%20%20']) {
-      const res = await app.request(`/postcodes/autocomplete?q=${q}`);
+      const res = await app.request(`/search?q=${q}`);
       expect(res.status, q).toBe(200);
       const body = (await res.json()) as { results: Array<{ postcode: string }> };
       expect(body.results.map((r) => r.postcode)).toEqual(['ZE1 0AA']);
@@ -78,14 +78,14 @@ describe('/postcodes/autocomplete', () => {
   });
 
   it('returns an empty list, not 404, when nothing matches', async () => {
-    const res = await app.request('/postcodes/autocomplete?q=SW1A');
+    const res = await app.request('/search?q=SW1A');
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ results: [] });
   });
 
   it('returns 400 in the documented shape for bad parameters', async () => {
     for (const qs of ['', 'q=', 'q=%20%20', 'q=---', 'q=ZE1%200AA%200', 'q=ZE1%200AA%200AA%200AA', 'q=ZE&limit=0', 'q=ZE&limit=51', 'q=ZE&limit=abc', 'q=ZE&limit=1.5']) {
-      const res = await app.request(`/postcodes/autocomplete?${qs}`);
+      const res = await app.request(`/search?${qs}`);
       expect(res.status, qs).toBe(400);
       expect(res.headers.get('cache-control')).toBeNull();
       const body = ErrorSchema.parse(await res.json());
@@ -95,24 +95,24 @@ describe('/postcodes/autocomplete', () => {
   });
 
   it('echoes a supplied request id', async () => {
-    const res = await app.request('/postcodes/autocomplete?q=ZE', { headers: { 'x-request-id': 'abc-123' } });
+    const res = await app.request('/search?q=ZE', { headers: { 'x-request-id': 'abc-123' } });
     expect(res.headers.get('x-request-id')).toBe('abc-123');
   });
 
   it('returns 503 while no index is held', async () => {
     const empty = createApp(new IndexHolder(), testConfig(), silentLogger);
-    const res = await empty.request('/postcodes/autocomplete?q=ZE');
+    const res = await empty.request('/search?q=ZE');
     expect(res.status).toBe(503);
     expect(ErrorSchema.parse(await res.json()).error).toBe('not_ready');
   });
 });
 
-describe('/postcodes/{postcode}', () => {
+describe('/{postcode}', () => {
   const app = createApp(loadedHolder(), testConfig({ cacheMaxAgeSeconds: 60 }), silentLogger);
 
   it('looks up with or without the space, any case', async () => {
     for (const p of ['ZE1 0AA', 'ze10aa', 'ZE1%200AA']) {
-      const res = await app.request(`/postcodes/${p}`);
+      const res = await app.request(`/${p}`);
       expect(res.status, p).toBe(200);
       expect(res.headers.get('cache-control')).toBe('public, max-age=60');
       expect(await res.json()).toEqual({ postcode: 'ZE1 0AA', lat: expect.any(Number), lon: expect.any(Number) });
@@ -120,21 +120,31 @@ describe('/postcodes/{postcode}', () => {
   });
 
   it('returns 404 in the documented shape for an unknown postcode', async () => {
-    const res = await app.request('/postcodes/ZE1%200ZZ');
+    const res = await app.request('/ZE1%200ZZ');
     expect(res.status).toBe(404);
     expect(ErrorSchema.parse(await res.json())).toEqual({ error: 'not_found' });
   });
 
-  it('returns 400 for a malformed postcode', async () => {
-    const res = await app.request('/postcodes/ZE1');
-    expect(res.status).toBe(400);
-    expect(ErrorSchema.parse(await res.json()).error).toBe('bad_request');
+  it('returns 400 for a postcode-shaped segment that is not a complete postcode', async () => {
+    for (const path of ['/ZE1%200', '/ZE1%200A', '/ZE10AAA', '/ZE1%200CA', '/1234567']) {
+      const res = await app.request(path);
+      expect(res.status, path).toBe(400);
+      expect(ErrorSchema.parse(await res.json()).error).toBe('bad_request');
+    }
   });
 
-  it('unknown routes return a JSON 404', async () => {
-    const res = await app.request('/nope');
-    expect(res.status).toBe(404);
-    expect(ErrorSchema.parse(await res.json()).error).toBe('not_found');
+  it('paths that are not postcode-shaped are unknown routes, not bad postcodes', async () => {
+    for (const path of ['/nope', '/favicon.ico', '/robots.txt', '/metrics', '/healthz', '/ZE1', '/ZE1%200AAAA', '/postcodes/ZE1%200AA']) {
+      const res = await app.request(path);
+      expect(res.status, path).toBe(404);
+      expect(ErrorSchema.parse(await res.json()).error).toBe('not_found');
+    }
+  });
+
+  it('ops routes are never shadowed by the lookup route', async () => {
+    expect((await app.request('/health')).status).toBe(200);
+    expect((await app.request('/openapi.json')).status).toBe(200);
+    expect((await app.request('/docs')).status).toBe(200);
   });
 });
 
@@ -146,11 +156,11 @@ describe('/openapi.json', () => {
     const spec = (await res.json()) as Record<string, any>;
     expect(spec.openapi).toBe('3.1.0');
     expect(spec.info.title).toContain('Postcode');
-    expect(Object.keys(spec.paths).sort()).toEqual(['/health', '/postcodes/autocomplete', '/postcodes/{postcode}']);
-    const auto = spec.paths['/postcodes/autocomplete'].get;
+    expect(Object.keys(spec.paths).sort()).toEqual(['/health', '/search', '/{postcode}']);
+    const auto = spec.paths['/search'].get;
     expect(Object.keys(auto.responses).sort()).toEqual(['200', '400', '503']);
     expect(auto.responses['200'].headers['Cache-Control']).toBeDefined();
-    const lookup = spec.paths['/postcodes/{postcode}'].get;
+    const lookup = spec.paths['/{postcode}'].get;
     expect(Object.keys(lookup.responses).sort()).toEqual(['200', '400', '404', '503']);
     expect(spec.components.schemas).toHaveProperty('Result');
     expect(spec.components.schemas).toHaveProperty('Error');

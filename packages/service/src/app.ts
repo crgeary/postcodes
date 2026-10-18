@@ -8,6 +8,16 @@ import { autocompleteQuerySchema, AutocompleteResponseSchema, ErrorSchema, Healt
 
 export const SERVICE_VERSION = '0.1.0';
 
+/**
+ * Pattern for the root lookup segment. Requiring a digit and 5 to 8 postcode
+ * characters keeps paths such as /favicon.ico, /metrics or /health from being
+ * treated as postcodes; they fall through to the JSON 404 instead.
+ */
+export const POSTCODE_SEGMENT = '(?=[A-Za-z ]*[0-9])[A-Za-z0-9 ]{5,8}';
+
+/** Literal routes that are not part of the hot path and are logged at info level. */
+export const OPS_PATHS: ReadonlySet<string> = new Set(['/health', '/openapi.json', '/docs']);
+
 type ValidationResult = { success: true; data: unknown } | { success: false; error: ReadonlyArray<{ path?: ReadonlyArray<PropertyKey | { key: PropertyKey }>; message: string }> };
 
 function badRequest(result: ValidationResult, c: { json: (body: unknown, status: 400) => Response }): Response | undefined {
@@ -28,13 +38,13 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
   const cacheControl = `public, max-age=${config.cacheMaxAgeSeconds}`;
   const cacheHeader = { 'Cache-Control': { description: 'Results change at most quarterly', schema: { type: 'string' as const } } };
 
-  app.use(requestLogging(logger));
+  app.use(requestLogging(logger, OPS_PATHS));
 
   app.get(
-    '/postcodes/autocomplete',
+    '/search',
     describeRoute({
       tags: ['postcodes'],
-      summary: 'Autocomplete a postcode prefix',
+      summary: 'Search postcodes by prefix',
       description:
         'Left-to-right prefix match. Input is uppercased and stripped of punctuation; the space is optional. ' +
         'Without a space every valid outward/inward split is tried, so `B11` matches both the B11 district and `B1 1..`. ' +
@@ -53,31 +63,6 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
       const results = index.search(q, limit);
       c.header('Cache-Control', cacheControl);
       return c.json({ results }, 200);
-    },
-  );
-
-  app.get(
-    '/postcodes/:postcode',
-    describeRoute({
-      tags: ['postcodes'],
-      summary: 'Look up one postcode',
-      description: 'Exact match, with or without the space, any case.',
-      responses: {
-        200: jsonResponse('The postcode', ResultSchema, cacheHeader),
-        400: jsonResponse('Malformed postcode', ErrorSchema),
-        404: jsonResponse('Unknown postcode', ErrorSchema),
-        503: jsonResponse('Index not loaded yet', ErrorSchema),
-      },
-    }),
-    validator('param', LookupParamSchema, badRequest),
-    (c) => {
-      const index = holder.current;
-      if (index === null) return c.json({ error: 'not_ready' as const }, 503);
-      const { postcode } = c.req.valid('param');
-      const result = index.lookup(postcode);
-      c.header('Cache-Control', cacheControl);
-      if (result === null) return c.json({ error: 'not_found' as const }, 404);
-      return c.json(result, 200);
     },
   );
 
@@ -140,6 +125,33 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
         `<body><script id="api-reference" data-url="/openapi.json"></script>` +
         `<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.25.0/dist/browser/standalone.min.js"></script></body></html>`,
     ),
+  );
+
+  app.get(
+    `/:postcode{${POSTCODE_SEGMENT}}`,
+    describeRoute({
+      tags: ['postcodes'],
+      summary: 'Look up one postcode',
+      description:
+        'Exact match, with or without the space, any case. The segment must look like a postcode ' +
+        '(5 to 8 letters, digits and spaces, containing a digit); anything else is an unknown route.',
+      responses: {
+        200: jsonResponse('The postcode', ResultSchema, cacheHeader),
+        400: jsonResponse('Malformed postcode', ErrorSchema),
+        404: jsonResponse('Unknown postcode', ErrorSchema),
+        503: jsonResponse('Index not loaded yet', ErrorSchema),
+      },
+    }),
+    validator('param', LookupParamSchema, badRequest),
+    (c) => {
+      const index = holder.current;
+      if (index === null) return c.json({ error: 'not_ready' as const }, 503);
+      const { postcode } = c.req.valid('param');
+      const result = index.lookup(postcode);
+      c.header('Cache-Control', cacheControl);
+      if (result === null) return c.json({ error: 'not_found' as const }, 404);
+      return c.json(result, 200);
+    },
   );
 
   app.notFound((c) => c.json({ error: 'not_found' as const, message: `no route for ${c.req.method} ${c.req.path}` }, 404));

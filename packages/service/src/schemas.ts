@@ -1,4 +1,4 @@
-import { MAX_QUERY_LENGTH, normaliseQuery } from '@postcode/index-format';
+import { MAX_QUERY_LENGTH, normalisePostcode, normaliseQuery } from '@postcode/index-format';
 import { z } from 'zod';
 
 export const ResultSchema = z
@@ -52,8 +52,16 @@ export function autocompleteQuerySchema(defaultLimit: number, maxLimit: number) 
   });
 }
 
+/** Outward of 2 to 4 characters followed by digit + two inward letters (no C, I, K, M, O, V). */
+const FULL_POSTCODE = /^[A-Z0-9]{2,4}[0-9][ABDEFGHJLNPQRSTUWXYZ]{2}$/;
+
 export const LookupParamSchema = z.object({
-  postcode: z.string().min(5).max(8).meta({ description: 'Full postcode, with or without the space', example: 'SW1A1AA' }),
+  postcode: z
+    .string()
+    .min(5)
+    .max(8)
+    .refine((s) => FULL_POSTCODE.test(normalisePostcode(s)), { message: 'must be a complete postcode such as SW1A 1AA' })
+    .meta({ description: 'Full postcode, with or without the space, any case', example: 'SW1A1AA' }),
 });
 
 export const HealthSchema = z

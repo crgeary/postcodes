@@ -6,7 +6,7 @@ Left-to-right UK postcode autocomplete and lookup, backed by a compact binary in
 | --- | --- |
 | `packages/index-format` | The index file format: encode, validate, and the `PostcodeIndex` query engine. No runtime dependencies, nothing asynchronous. |
 | `packages/indexer` | `postcode-index build` turns ONSPD CSV releases into one `.idx` file; `postcode-index inspect` verifies and describes one. |
-| `packages/service` | Hono HTTP service: `/postcodes/autocomplete`, `/postcodes/{postcode}`, `/health`, `/openapi.json`, `/docs`. |
+| `packages/service` | Hono HTTP service: `/search`, `/{postcode}`, `/health`, `/openapi.json`, `/docs`. |
 
 The full UK index (1.8 million live postcodes with coordinates, 2,977 districts) is 8.8 MB, loads in about 3 ms, and answers a search in well under 10 µs. Memory is proportional to the number of districts, not postcodes: each district holds a 4,000-bit set of possible inward codes, and each postcode stores only a 4-byte quantised coordinate. See [PLAN.md](PLAN.md) for the design and [docs/RUNBOOK.md](docs/RUNBOOK.md) for operations.
 
@@ -78,11 +78,11 @@ POSTCODE_INDEX=packages/service/data/postcodes.idx pnpm service
 Then:
 
 ```bash
-curl 'http://localhost:3000/postcodes/autocomplete?q=sw1a1&limit=5'
+curl 'http://localhost:3000/search?q=sw1a1&limit=5'
 ```
 
 ```bash
-curl http://localhost:3000/postcodes/SW1A1AA
+curl http://localhost:3000/SW1A1AA
 ```
 
 Interactive documentation is at `/docs`; the OpenAPI 3.1 document is at `/openapi.json`.
@@ -105,10 +105,12 @@ Interactive documentation is at `/docs`; the OpenAPI 3.1 document is at `/openap
 
 | Route | Parameters | Response |
 | --- | --- | --- |
-| `GET /postcodes/autocomplete` | `q` (1 to 8 characters, required), `limit` (1 to 50, default 10) | `{ results: [{ postcode, lat?, lon? }] }`. Empty list when nothing matches; 400 on invalid parameters. |
-| `GET /postcodes/{postcode}` | Full postcode, space optional, any case | `{ postcode, lat?, lon? }`, or 404 `{ error: "not_found" }`. |
+| `GET /search` | `q` (1 to 8 characters after normalisation, required), `limit` (1 to 50, default 10) | `{ results: [{ postcode, lat?, lon? }] }`. Empty list when nothing matches; 400 on invalid parameters. |
+| `GET /{postcode}` | Full postcode, space optional, any case | `{ postcode, lat?, lon? }`, 400 if the segment is not a complete postcode, or 404 `{ error: "not_found" }`. |
 | `GET /health` | none | Readiness, index metadata, refresh state, memory. 503 until an index is loaded. |
 | `GET /openapi.json` | none | OpenAPI 3.1 document. |
+
+The lookup route lives at the root, so it only matches segments that look like a postcode: 5 to 8 letters, digits and spaces including at least one digit. Anything else (`/favicon.ico`, `/metrics`) is an unknown route and gets the JSON 404. New literal routes must not be postcode-shaped; the existing ones (`/health`, `/openapi.json`, `/docs`) are registered first and are not.
 
 Postcodes are always returned with the space. Without a space in the query every valid outward/inward split is tried, so `B11` returns the B11 district first and then `B1 1…`. `lat` and `lon` are omitted for the few postcodes ONSPD lists without a grid reference.
 
