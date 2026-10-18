@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PostcodeIndex } from '@postcode/index-format';
@@ -103,7 +103,9 @@ describe('build and inspect', () => {
     const loaded = PostcodeIndex.fromBytes(readFileSync(out));
     const report = loaded.metadata.report as BuildReport;
     expect(report.postcodes).toBe(658);
-    expect(report.fileBytes).toBe(outcome.fileBytes);
+    expect(report).not.toHaveProperty('fileBytes');
+    expect(existsSync(out + '.tmp')).toBe(false);
+    expect(outcome.precision[0].outward).toBe('ZE2');
     expect(report.skipped.terminated).toBe(762 - 1 - 658);
     expect(report.worstDistricts[0].outward).toBe('ZE2');
     expect(loaded.metadata.worstPrecisionM).toBeCloseTo(report.worstPrecisionM, 2);
@@ -133,7 +135,8 @@ describe('build and inspect', () => {
       precisionThresholdM: 1,
     });
     expect(outcome.index.metadata.release).toBe('MAY_2026');
-    const over = districtsOverThreshold(outcome.index.precisionReport(), outcome.thresholdM);
+    const over = districtsOverThreshold(outcome.precision, outcome.thresholdM);
+    expect(outcome.precision).toEqual(outcome.index.precisionReport());
     expect(over.map((d) => d.outward)).toEqual(['AB1']);
     expect(over[0].precisionM).toBeGreaterThan(1.5);
     const text = inspect(join(dir, 'ab.idx')).text;

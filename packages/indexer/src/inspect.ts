@@ -20,7 +20,7 @@ export function inspect(path: string, thresholdM?: number): InspectResult {
     `Flags:          0x${h.flags.toString(16).padStart(4, '0')} (coordinates: ${index.hasCoordinates ? 'yes' : 'no'})`,
     `Checksum:       sha256:${checksumHex(h.checksum)} (verified)`,
     `Metadata:       ${h.metadataLength} bytes`,
-    formatReport(index.metadata, index, bytes.byteLength, threshold),
+    formatReport(index.metadata, index, bytes.byteLength, threshold, index.precisionReport()),
   ];
   return { index, text: lines.join('\n') };
 }

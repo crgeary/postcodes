@@ -1,14 +1,13 @@
-import type { DistrictPrecision, IndexMetadata, PostcodeIndex } from '@postcode/index-format';
+import type { BuildSummary, DistrictPrecision, IndexMetadata, PostcodeIndex } from '@postcode/index-format';
 import type { CollectCounts } from './collect.js';
 
 /** Default alert threshold: a district worse than this usually has an outlier coordinate. */
 export const DEFAULT_PRECISION_THRESHOLD_M = 5;
 
-/** Counts stored in the index metadata under `report`. */
+/** Counts stored in the index metadata under `report`. The file size is not embedded; inspect reads it from disk. */
 export interface BuildReport {
   postcodes: number;
   districts: number;
-  fileBytes: number;
   skipped: {
     terminated: number;
     excluded: number;
@@ -21,17 +20,11 @@ export interface BuildReport {
   worstDistricts: Array<{ outward: string; postcodes: number; precisionM: number }>;
 }
 
-export function makeBuildReport(
-  counts: CollectCounts,
-  index: PostcodeIndex,
-  fileBytes: number,
-  thresholdM: number,
-): BuildReport {
-  const precision = index.precisionReport();
+export function makeBuildReport(counts: CollectCounts, summary: BuildSummary, thresholdM: number): BuildReport {
+  const precision = summary.precision;
   return {
-    postcodes: index.postcodeCount,
-    districts: index.districtCount,
-    fileBytes,
+    postcodes: summary.postcodeCount,
+    districts: summary.districtCount,
     skipped: {
       terminated: counts.terminated,
       excluded: counts.excluded,
@@ -63,8 +56,14 @@ function fmtBytes(n: number): string {
   return `${n} B`;
 }
 
-/** Human-readable report for stdout, shared by `build` and `inspect`. */
-export function formatReport(metadata: IndexMetadata, index: PostcodeIndex, fileBytes: number, thresholdM: number): string {
+/** Human-readable report for stdout, shared by `build` and `inspect`. `precision` is `index.precisionReport()`, computed once by the caller. */
+export function formatReport(
+  metadata: IndexMetadata,
+  index: PostcodeIndex,
+  fileBytes: number,
+  thresholdM: number,
+  precision: DistrictPrecision[],
+): string {
   const lines: string[] = [];
   const report = metadata.report as BuildReport | undefined;
   lines.push(`Release:        ${metadata.release}`);
@@ -82,7 +81,6 @@ export function formatReport(metadata: IndexMetadata, index: PostcodeIndex, file
     lines.push(`  duplicates:   ${report.skipped.duplicates.toLocaleString('en-GB')}`);
     lines.push(`Without coords: ${report.withoutCoordinates.toLocaleString('en-GB')}`);
   }
-  const precision = index.precisionReport();
   const worst = precision.length > 0 ? precision[0].precisionM : 0;
   lines.push(`Worst precision: ${worst.toFixed(3)} m (threshold ${thresholdM} m)`);
   lines.push('Ten worst districts:');

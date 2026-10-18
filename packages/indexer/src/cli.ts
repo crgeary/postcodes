@@ -75,11 +75,13 @@ async function runBuild(argv: string[]): Promise<number> {
   });
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   process.stdout.write(`Wrote ${values.output} in ${seconds}s\n`);
-  process.stdout.write(formatReport(outcome.index.metadata, outcome.index, outcome.fileBytes, outcome.thresholdM) + '\n');
+  process.stdout.write(
+    formatReport(outcome.index.metadata, outcome.index, outcome.fileBytes, outcome.thresholdM, outcome.precision) + '\n',
+  );
   if (outcome.counts.invalid > 0) {
     process.stderr.write(`warning: ${outcome.counts.invalid} invalid rows; the ONSPD format may have changed\n`);
   }
-  const over = districtsOverThreshold(outcome.index.precisionReport(), outcome.thresholdM);
+  const over = districtsOverThreshold(outcome.precision, outcome.thresholdM);
   return over.length > 0 ? 1 : 0;
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { NO_COORDINATE, PostcodeIndex } from '../src/index.js';
+import { buildIndex, NO_COORDINATE, PostcodeIndex } from '../src/index.js';
+import * as helpers from './helpers/fixture.js';
 import { buildFixture, openFixture, readLiveRows, type LiveRow } from './helpers/fixture.js';
 
 describe('coordinates', () => {
@@ -45,6 +46,24 @@ describe('coordinates', () => {
     const next = idx.lookup('ZE1 0AB')!;
     expect(next.lat).toBeCloseTo(rows.find((r) => r.inward === '0AB' && r.outward === 'ZE1')!.lat, 4);
     expect(NO_COORDINATE).toBe(0xffff);
+  });
+
+  it('buildIndex leaves the caller\'s districts and entries untouched and reports a summary', () => {
+    const { districtsFromRows } = helpers;
+    const districts = districtsFromRows(rows).reverse();
+    const beforeOutwards = districts.map((d) => d.outward);
+    const beforeInwards = districts.map((d) => d.entries.map((e) => e.inward));
+    const result = buildIndex(districts, { release: 'X', builtAt: 'now', exclusions: [], sourceFiles: [] }, {
+      extendMetadata: (summary) => ({ districtsSeen: summary.districtCount, worst: summary.precision[0].outward }),
+    });
+    expect(districts.map((d) => d.outward)).toEqual(beforeOutwards);
+    expect(districts.map((d) => d.entries.map((e) => e.inward))).toEqual(beforeInwards);
+    expect(result.postcodeCount).toBe(658);
+    expect(result.precision.length).toBe(3);
+    expect(result.metadata.districtsSeen).toBe(3);
+    expect(result.metadata.worst).toBe('ZE2');
+    expect(result.metadata.worstPrecisionM).toBe(result.worstPrecisionM);
+    expect(PostcodeIndex.fromBuffer(result.buffer).metadata.worst).toBe('ZE2');
   });
 
   it('precision report is sorted worst first and within the 5 m threshold for ZE', () => {

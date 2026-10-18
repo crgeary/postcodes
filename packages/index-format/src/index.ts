@@ -16,5 +16,13 @@ export type { IndexMetadata } from './metadata.js';
 export { districtPrecisionMetres, type DistrictPrecision } from './precision.js';
 export { normaliseQuery, normalisePostcode } from './normalise.js';
 export { validateIndexBuffer, type ValidatedIndex } from './validate.js';
-export { buildIndex, type BuildDistrict, type BuildEntry, type BuildMetadata, type BuildResult } from './encode.js';
+export {
+  buildIndex,
+  type BuildDistrict,
+  type BuildEntry,
+  type BuildMetadata,
+  type BuildOptions,
+  type BuildResult,
+  type BuildSummary,
+} from './encode.js';
 export { PostcodeIndex, popcount32, type PostcodeResult } from './index-reader.js';

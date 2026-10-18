@@ -14,7 +14,7 @@ import {
 } from './constants.js';
 import { computeLayout, IndexFormatError, writeHeader } from './header.js';
 import type { IndexMetadata } from './metadata.js';
-import { districtPrecisionMetres } from './precision.js';
+import { districtPrecisionMetres, type DistrictPrecision } from './precision.js';
 
 /** One live postcode within a district. `lat`/`lon` are NaN when missing. */
 export interface BuildEntry {
@@ -39,12 +39,27 @@ export interface BuildMetadata {
   [key: string]: unknown;
 }
 
-export interface BuildResult {
-  buffer: ArrayBuffer;
-  metadata: IndexMetadata;
+/** What the builder knows once bounding boxes are computed, before the file is laid out. */
+export interface BuildSummary {
   districtCount: number;
   postcodeCount: number;
   withoutCoordinates: number;
+  worstPrecisionM: number;
+  /** Per-district quantisation precision, worst first. */
+  precision: DistrictPrecision[];
+}
+
+export interface BuildOptions {
+  /**
+   * Extra metadata keys derived from the summary (e.g. the indexer's report),
+   * so callers never need a second build to embed build-time figures.
+   */
+  extendMetadata?: (summary: BuildSummary) => Record<string, unknown>;
+}
+
+export interface BuildResult extends BuildSummary {
+  buffer: ArrayBuffer;
+  metadata: IndexMetadata;
 }
 
 const encoder = new TextEncoder();
@@ -65,18 +80,21 @@ function quantise(value: number, min: number, span: number): number {
 
 /**
  * Build a complete index file image from in-memory districts. Districts and
- * entries are sorted here; callers do not need to pre-sort. Throws on invalid
- * outwards, inward indexes out of range, or duplicate postcodes.
+ * entries are sorted on copies; the caller's arrays are left untouched.
+ * Throws on invalid outwards, inward indexes out of range, or duplicate
+ * postcodes.
  */
-export function buildIndex(districtsIn: BuildDistrict[], metadataIn: BuildMetadata): BuildResult {
+export function buildIndex(districtsIn: BuildDistrict[], metadataIn: BuildMetadata, options: BuildOptions = {}): BuildResult {
   const districts = districtsIn.slice().sort((a, b) => compareCodeUnits(a.outward, b.outward));
   const D = districts.length;
+  const sortedEntries: BuildEntry[][] = new Array(D);
   let N = 0;
   let withoutCoordinates = 0;
 
   // Per-district bounding boxes, stored as Float32 first so quantisation
   // happens against the values the reader will decode with.
   const bbox = new Float32Array(D * BBOX_FLOATS);
+  const precision: DistrictPrecision[] = new Array(D);
   let worstPrecisionM = 0;
 
   for (let d = 0; d < D; d++) {
@@ -92,17 +110,18 @@ export function buildIndex(districtsIn: BuildDistrict[], metadataIn: BuildMetada
     if (d > 0 && districts[d - 1].outward === outward) {
       throw new IndexFormatError(`duplicate district ${outward}`);
     }
-    district.entries.sort((a, b) => a.inward - b.inward);
+    const entries = district.entries.slice().sort((a, b) => a.inward - b.inward);
+    sortedEntries[d] = entries;
     let minLat = Infinity;
     let maxLat = -Infinity;
     let minLon = Infinity;
     let maxLon = -Infinity;
-    for (let i = 0; i < district.entries.length; i++) {
-      const e = district.entries[i];
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
       if (e.inward < 0 || e.inward >= INWARD_COUNT || (e.inward | 0) !== e.inward) {
         throw new IndexFormatError(`invalid inward index ${e.inward} in ${outward}`);
       }
-      if (i > 0 && district.entries[i - 1].inward === e.inward) {
+      if (i > 0 && entries[i - 1].inward === e.inward) {
         throw new IndexFormatError(`duplicate postcode in ${outward} (inward ${e.inward})`);
       }
       if (hasCoords(e)) {
@@ -114,8 +133,9 @@ export function buildIndex(districtsIn: BuildDistrict[], metadataIn: BuildMetada
         withoutCoordinates++;
       }
     }
-    N += district.entries.length;
+    N += entries.length;
     const b = d * BBOX_FLOATS;
+    let p = 0;
     if (minLat === Infinity) {
       // No coordinates at all: zero box.
       bbox[b] = 0;
@@ -127,14 +147,24 @@ export function buildIndex(districtsIn: BuildDistrict[], metadataIn: BuildMetada
       bbox[b + 1] = minLon;
       bbox[b + 2] = maxLat - minLat;
       bbox[b + 3] = maxLon - minLon;
-      const p = districtPrecisionMetres(bbox[b], bbox[b + 2], bbox[b + 3]);
+      p = districtPrecisionMetres(bbox[b], bbox[b + 2], bbox[b + 3]);
       if (p > worstPrecisionM) worstPrecisionM = p;
     }
+    precision[d] = { outward, postcodes: entries.length, precisionM: p, latSpan: bbox[b + 2], lonSpan: bbox[b + 3] };
   }
+  precision.sort((a, b) => b.precisionM - a.precisionM);
 
+  const summary: BuildSummary = {
+    districtCount: D,
+    postcodeCount: N,
+    withoutCoordinates,
+    worstPrecisionM: Math.round(worstPrecisionM * 1000) / 1000,
+    precision,
+  };
   const metadata: IndexMetadata = {
     ...metadataIn,
-    worstPrecisionM: Math.round(worstPrecisionM * 1000) / 1000,
+    ...(options.extendMetadata ? options.extendMetadata(summary) : {}),
+    worstPrecisionM: summary.worstPrecisionM,
   };
   const metadataBytes = encoder.encode(JSON.stringify(metadata));
   const flags = FLAG_HAS_COORDINATES;
@@ -171,7 +201,7 @@ export function buildIndex(districtsIn: BuildDistrict[], metadataIn: BuildMetada
     const latSpan = bbox[b + 2];
     const lonSpan = bbox[b + 3];
     const wordBase = d * WORDS_PER_DISTRICT;
-    for (const e of district.entries) {
+    for (const e of sortedEntries[d]) {
       bits[wordBase + (e.inward >>> 5)] |= 1 << (e.inward & 31);
       if (hasCoords(e)) {
         coords[r * 2] = quantise(e.lat, minLat, latSpan);
@@ -186,5 +216,5 @@ export function buildIndex(districtsIn: BuildDistrict[], metadataIn: BuildMetada
   rank[D] = r;
 
   new Uint8Array(buffer, CHECKSUM_OFFSET, 32).set(computeChecksum(buffer));
-  return { buffer, metadata, districtCount: D, postcodeCount: N, withoutCoordinates };
+  return { ...summary, buffer, metadata };
 }
