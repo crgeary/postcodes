@@ -1,5 +1,5 @@
-import { renameSync, writeFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, dirname } from 'node:path';
 import { buildIndex, PostcodeIndex, type DistrictPrecision } from '@postcode/index-format';
 import { collectDistricts, type CollectCounts } from './collect.js';
 import { DEFAULT_PRECISION_THRESHOLD_M, makeBuildReport, type BuildReport } from './report.js';
@@ -60,6 +60,7 @@ export async function build(options: BuildOptions): Promise<BuildOutcome> {
       return { report };
     },
   });
+  mkdirSync(dirname(options.output), { recursive: true });
   const tmp = `${options.output}.tmp`;
   writeFileSync(tmp, new Uint8Array(result.buffer));
   renameSync(tmp, options.output);

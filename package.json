@@ -15,7 +15,9 @@
     "typecheck": "pnpm -r --filter './packages/*' run typecheck",
     "lint": "bash scripts/check-no-async.sh",
     "bench": "pnpm --filter @postcode/index-format run bench",
-    "check": "pnpm lint && pnpm typecheck && pnpm test"
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "index": "node --conditions=development --import tsx packages/indexer/src/cli.ts",
+    "service": "node --conditions=development --import tsx packages/service/src/server.ts"
   },
   "devDependencies": {
     "@types/node": "^22.19.0",

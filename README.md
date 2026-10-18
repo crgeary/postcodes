@@ -23,19 +23,19 @@ pnpm install
 Download an ONSPD release (the single UK file, or the per-area files under `multi_csv/`), then:
 
 ```bash
-pnpm --filter @postcode/indexer run dev build -o packages/service/data/postcodes.idx /path/to/ONSPD_FEB_2026_UK.csv
+pnpm index build -o packages/service/data/postcodes.idx /path/to/ONSPD_FEB_2026_UK.csv
 ```
 
-Flags: `--exclude-ni`, `--exclude-crown-dependencies`, `--gb-only`, `--release FEB_2026`, `--precision-threshold 5`. The build prints a report (counts, file size, ten worst districts by coordinate precision) and exits non-zero if any district exceeds the precision threshold, which usually means an outlier coordinate. Verify any index before deploying it:
+Run these from the repository root; relative paths resolve against your current directory, and the output directory is created if missing. Flags: `--exclude-ni`, `--exclude-crown-dependencies`, `--gb-only`, `--release FEB_2026`, `--precision-threshold 5`. The build prints a report (counts, file size, ten worst districts by coordinate precision) and exits non-zero if any district exceeds the precision threshold, which usually means an outlier coordinate. Verify any index before deploying it:
 
 ```bash
-pnpm --filter @postcode/indexer run dev inspect packages/service/data/postcodes.idx
+pnpm index inspect packages/service/data/postcodes.idx
 ```
 
 ## Run the service
 
 ```bash
-POSTCODE_INDEX=./data/postcodes.idx pnpm --filter @postcode/service run dev
+POSTCODE_INDEX=packages/service/data/postcodes.idx pnpm service
 ```
 
 Then:

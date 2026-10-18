@@ -143,6 +143,14 @@ describe('build and inspect', () => {
     expect(text).toContain('ALERT: 1 district(s) exceed 1 m: AB1');
   });
 
+  it('creates a missing output directory and leaves no temp file behind', async () => {
+    const dir = tempDir();
+    const out = join(dir, 'nested', 'deeper', 'ze.idx');
+    await build({ inputs: [ZE_CSV], output: out, excludeNorthernIreland: false, excludeCrownDependencies: false });
+    expect(existsSync(out)).toBe(true);
+    expect(existsSync(out + '.tmp')).toBe(false);
+  });
+
   it('derives the release from the file name', () => {
     expect(releaseFromFilename('/x/ONSPD_FEB_2026_UK.csv')).toBe('FEB_2026');
     expect(releaseFromFilename('/x/multi_csv/ONSPD_feb_2026_UK_ZE.csv')).toBe('FEB_2026');

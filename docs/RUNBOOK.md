@@ -59,14 +59,14 @@ To publish a new index for fetched mode, upload the file to the index host with 
 2. Build with the agreed flags and review the precision report:
 
    ```bash
-   pnpm --filter @postcode/indexer run dev build --release MAY_2026 -o postcodes.idx /path/to/ONSPD_MAY_2026_UK.csv
+   pnpm index build --release MAY_2026 -o postcodes.idx /path/to/ONSPD_MAY_2026_UK.csv
    ```
 
    The build exits non-zero if any district exceeds the precision threshold (default 5 m). That usually means an outlier coordinate widening a district's bounding box; check the named district against the source rows before accepting the file.
 3. Inspect the output and compare the postcode count with the previous release. Expect a small net increase; a large drop means rows were rejected (see the `invalid` count) or a column was renamed.
 
    ```bash
-   pnpm --filter @postcode/indexer run dev inspect postcodes.idx
+   pnpm index inspect postcodes.idx
    ```
 
 4. Fetched mode: publish to the index host. Bundled mode: copy to `packages/service/data/postcodes.idx` and rebuild the image.
