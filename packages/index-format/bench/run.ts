@@ -6,8 +6,12 @@
  *   - peak arrayBuffers after ten consecutive refreshes under 2x index size
  *
  * Set BENCH_INDEX=<path> to benchmark a real index instead of the synthetic one.
+ *
+ * Each section is a function so its locals (and the index they hold) are
+ * unreachable once it returns; the memory section must see only the index
+ * it is holding itself.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PostcodeIndex } from '../src/index.js';
 import { syntheticIndexBytes } from './synthetic.js';
@@ -22,11 +26,16 @@ if (!gc) {
   console.error('run with --expose-gc');
   process.exit(2);
 }
+const collect = gc;
 
 const indexPath =
   process.env.BENCH_INDEX ?? fileURLToPath(new URL('../../../bench-data/synthetic.idx', import.meta.url));
-const bytes = process.env.BENCH_INDEX ? readFileSync(indexPath) : syntheticIndexBytes(indexPath);
-const indexBytes = bytes.byteLength;
+// Generate (and cache on disk) the synthetic index if needed, but do not keep
+// its bytes: every section reads the file, so the bench itself never holds a
+// copy that would distort the memory measurement.
+if (!process.env.BENCH_INDEX) syntheticIndexBytes(indexPath);
+const indexBytes = statSync(indexPath).size;
+const readIndex = (): Uint8Array => readFileSync(indexPath);
 
 let failed = false;
 function check(name: string, value: number, limit: number, unit: string): void {
@@ -40,13 +49,25 @@ function median(xs: number[]): number {
   return s[s.length >> 1];
 }
 
+/**
+ * ArrayBuffer backing stores are freed by V8's array-buffer sweeper after the
+ * owning objects die, which can finish after gc() returns. Collect twice
+ * around a macrotask so readings reflect the steady state rather than sweeper
+ * timing (otherwise seen as exactly 2.0x on CI runners).
+ */
+async function settle(): Promise<void> {
+  collect();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  collect();
+}
+
 // ---------------------------------------------------------------- load time
-{
+function benchLoad(): void {
   const times: number[] = [];
   let index: PostcodeIndex | undefined;
   for (let i = 0; i < 7; i++) {
-    gc();
-    const fresh = process.env.BENCH_INDEX ? readFileSync(indexPath) : bytes.slice();
+    collect();
+    const fresh = readIndex();
     const t0 = performance.now();
     index = PostcodeIndex.fromBytes(fresh);
     times.push(performance.now() - t0);
@@ -58,8 +79,8 @@ function median(xs: number[]): number {
 }
 
 // ------------------------------------------------------------ search latency
-{
-  const index = PostcodeIndex.fromBytes(bytes.slice());
+function benchSearch(): void {
+  const index = PostcodeIndex.fromBytes(readIndex());
   const outwards = index.outwards;
   const pick = (i: number) => outwards[(i * 7919) % outwards.length];
   // Mix of single letters, outward prefixes, full outwards, space + inward
@@ -96,21 +117,25 @@ function median(xs: number[]): number {
 }
 
 // ---------------------------------------------------------- refresh memory
-{
-  gc();
-  const baseline = process.memoryUsage().arrayBuffers;
+// Criterion from PLAN.md: peak arrayBuffers after ten consecutive refreshes
+// under 2x the index size. Steady state is about 1x (the one held index);
+// 2x means an old index is being retained across swaps.
+async function benchRefresh(): Promise<void> {
   let current: PostcodeIndex | null = null;
   let peak = 0;
   for (let i = 0; i < 10; i++) {
-    const fresh = process.env.BENCH_INDEX ? readFileSync(indexPath) : bytes.slice();
-    const next = PostcodeIndex.fromBytes(fresh);
+    const next = PostcodeIndex.fromBytes(readIndex());
     current = next; // the only reference to the old index is dropped here
-    gc();
-    const now = process.memoryUsage().arrayBuffers - baseline;
+    await settle();
+    const now = process.memoryUsage().arrayBuffers;
     if (now > peak) peak = now;
   }
   console.log(`refresh: held ${current!.postcodeCount} postcodes, peak arrayBuffers ${(peak / 1e6).toFixed(2)} MB over 10 refreshes`);
   check('peak arrayBuffers / index size', peak / indexBytes, REFRESH_FACTOR, 'x');
 }
 
+benchLoad();
+benchSearch();
+await settle();
+await benchRefresh();
 process.exit(failed ? 1 : 0);
