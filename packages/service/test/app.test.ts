@@ -206,6 +206,11 @@ describe('/openapi.json', () => {
     expect(spec.info.title).toContain('Postcode');
     expect(Object.keys(spec.paths).sort()).toEqual(['/health', '/search', '/{postcode}']);
     const auto = spec.paths['/search'].get;
+    expect(auto.operationId).toBe('searchPostcodes');
+    expect(spec.paths['/{postcode}'].get.operationId).toBe('lookupPostcode');
+    expect(spec.paths['/health'].get.operationId).toBe('getHealth');
+    const ids = Object.values(spec.paths).flatMap((p: any) => Object.values(p).map((op: any) => op.operationId));
+    expect(new Set(ids).size).toBe(ids.length);
     expect(Object.keys(auto.responses).sort()).toEqual(['200', '400', '503']);
     expect(auto.responses['200'].headers['Cache-Control']).toBeDefined();
     const lookup = spec.paths['/{postcode}'].get;

@@ -76,6 +76,7 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
   app.get(
     '/search',
     describeRoute({
+      operationId: 'searchPostcodes',
       tags: ['postcodes'],
       summary: 'Search postcodes by prefix',
       description:
@@ -102,6 +103,7 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
   app.get(
     '/health',
     describeRoute({
+      operationId: 'getHealth',
       tags: ['ops'],
       summary: 'Readiness and index metadata',
       description: '503 until an index is held and again once shutdown begins, so orchestrators can gate traffic on it.',
@@ -164,6 +166,7 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
   app.get(
     `/:postcode{${POSTCODE_SEGMENT}}`,
     describeRoute({
+      operationId: 'lookupPostcode',
       tags: ['postcodes'],
       summary: 'Look up one postcode',
       description:
