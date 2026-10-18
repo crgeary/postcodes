@@ -105,12 +105,20 @@ Interactive documentation is at `/docs`; the OpenAPI 3.1 document is at `/openap
 
 | Route | Parameters | Response |
 | --- | --- | --- |
-| `GET /search` | `q` (1 to 8 characters after normalisation, required), `limit` (1 to 50, default 10) | `{ results: [{ postcode, lat?, lon? }] }`. Empty list when nothing matches; 400 on invalid parameters. |
-| `GET /{postcode}` | Full postcode, space optional, any case | `{ postcode, lat?, lon? }`, 400 if the segment is not a complete postcode, or 404 `{ error: "not_found" }`. |
-| `GET /health` | none | Readiness, index metadata, refresh state, memory. 503 until an index is loaded. |
+| `GET /search` | `q` (1 to 8 characters after normalisation, required), `limit` (1 to 50, default 10) | `{ data: [{ postcode, lat?, lon? }] }`. Empty list when nothing matches; 400 on invalid parameters. |
+| `GET /{postcode}` | Full postcode, space optional, any case | `{ data: { postcode, lat?, lon? } }`, 400 if the segment is not a complete postcode, 404 if unknown. |
+| `GET /health` | none | `{ data: { status, ready, index, refresh, memory } }`. 503 with the same document until an index is loaded. |
 | `GET /openapi.json` | none | OpenAPI 3.1 document. |
 
 The lookup route lives at the root, so it only matches segments that look like a postcode: 5 to 8 letters, digits and spaces including at least one digit. Anything else (`/favicon.ico`, `/metrics`) is an unknown route and gets the JSON 404. New literal routes must not be postcode-shaped; the existing ones (`/health`, `/openapi.json`, `/docs`) are registered first and are not.
+
+**Response envelope.** Every successful response puts its payload under `data`: a list for search, an object for lookup and health. Every error puts its detail under `error`:
+
+```json
+{ "error": { "code": "bad_request", "message": "invalid request", "issues": [{ "message": "limit must be at most 50", "path": ["limit"] }] } }
+```
+
+`code` is one of `bad_request`, `not_found`, `not_ready` or `internal`. `issues` appears on validation errors only and follows the [Standard Schema](https://standardschema.dev) issue format: a `message` and the `path` to the offending value as an array of keys.
 
 Postcodes are always returned with the space. Without a space in the query every valid outward/inward split is tried, so `B11` returns the B11 district first and then `B1 1…`. `lat` and `lon` are omitted for the few postcodes ONSPD lists without a grid reference.
 

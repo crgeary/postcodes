@@ -4,7 +4,17 @@ import type { IndexHolder } from './holder.js';
 import type { Logger } from './logger.js';
 import { requestLogging, type AppEnv } from './logging.js';
 import { describeRoute, jsonResponse, specHandler, validator } from './openapi.js';
-import { autocompleteQuerySchema, AutocompleteResponseSchema, ErrorSchema, HealthSchema, LookupParamSchema, ResultSchema, type Health } from './schemas.js';
+import {
+  autocompleteQuerySchema,
+  ErrorSchema,
+  HealthResponseSchema,
+  LookupParamSchema,
+  LookupResponseSchema,
+  SearchResponseSchema,
+  type ErrorCode,
+  type Health,
+  type Issue,
+} from './schemas.js';
 
 export const SERVICE_VERSION = '0.1.0';
 
@@ -18,15 +28,27 @@ export const POSTCODE_SEGMENT = '(?=[A-Za-z ]*[0-9])[A-Za-z0-9 ]{5,8}';
 /** Literal routes that are not part of the hot path and are logged at info level. */
 export const OPS_PATHS: ReadonlySet<string> = new Set(['/health', '/openapi.json', '/docs']);
 
-type ValidationResult = { success: true; data: unknown } | { success: false; error: ReadonlyArray<{ path?: ReadonlyArray<PropertyKey | { key: PropertyKey }>; message: string }> };
+/** Standard Schema issue as the validator hook receives it. */
+type StandardIssue = { message: string; path?: ReadonlyArray<PropertyKey | { key: PropertyKey }> };
+type ValidationResult = { success: true; data: unknown } | { success: false; error: ReadonlyArray<StandardIssue> };
+
+/** Error envelope shared by every non-2xx response. */
+export function errorBody(code: ErrorCode, message: string, issues?: Issue[]) {
+  return { error: issues ? { code, message, issues } : { code, message } };
+}
+
+/** Standard Schema path segments are keys or `{ key }` objects; symbols cannot be serialised. */
+function toIssue(issue: StandardIssue): Issue {
+  const path = (issue.path ?? []).map((p) => {
+    const key = typeof p === 'object' ? p.key : p;
+    return typeof key === 'number' ? key : String(key);
+  });
+  return path.length > 0 ? { message: issue.message, path } : { message: issue.message };
+}
 
 function badRequest(result: ValidationResult, c: { json: (body: unknown, status: 400) => Response }): Response | undefined {
   if (result.success) return undefined;
-  const issues = result.error.map((issue) => ({
-    path: (issue.path ?? []).map((p) => String(typeof p === 'object' ? p.key : p)).join('.'),
-    message: issue.message,
-  }));
-  return c.json({ error: 'bad_request', message: 'invalid request', issues }, 400);
+  return c.json(errorBody('bad_request', 'invalid request', result.error.map(toIssue)), 400);
 }
 
 /**
@@ -50,7 +72,7 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
         'Without a space every valid outward/inward split is tried, so `B11` matches both the B11 district and `B1 1..`. ' +
         'Returns an empty list rather than 404 when nothing matches.',
       responses: {
-        200: jsonResponse('Matching postcodes', AutocompleteResponseSchema, cacheHeader),
+        200: jsonResponse('Matching postcodes', SearchResponseSchema, cacheHeader),
         400: jsonResponse('Invalid query parameters', ErrorSchema),
         503: jsonResponse('Index not loaded yet', ErrorSchema),
       },
@@ -58,11 +80,11 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
     validator('query', autocompleteQuerySchema(config.searchDefaultLimit, config.searchMaxLimit), badRequest),
     (c) => {
       const index = holder.current;
-      if (index === null) return c.json({ error: 'not_ready' as const }, 503);
+      if (index === null) return c.json(errorBody('not_ready', 'index not loaded yet'), 503);
       const { q, limit } = c.req.valid('query');
-      const results = index.search(q, limit);
+      const data = index.search(q, limit);
       c.header('Cache-Control', cacheControl);
-      return c.json({ results }, 200);
+      return c.json({ data }, 200);
     },
   );
 
@@ -73,8 +95,8 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
       summary: 'Readiness and index metadata',
       description: '503 until an index is held, so orchestrators can gate traffic on it.',
       responses: {
-        200: jsonResponse('Ready', HealthSchema),
-        503: jsonResponse('Not ready', HealthSchema),
+        200: jsonResponse('Ready', HealthResponseSchema),
+        503: jsonResponse('Not ready; the same document, so the diagnostics are available', HealthResponseSchema),
       },
     }),
     (c) => {
@@ -103,7 +125,7 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
         memory: { arrayBuffers: mem.arrayBuffers, rss: mem.rss, heapUsed: mem.heapUsed },
       };
       c.header('Cache-Control', 'no-store');
-      return c.json(body, index ? 200 : 503);
+      return c.json({ data: body }, index ? 200 : 503);
     },
   );
 
@@ -136,7 +158,7 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
         'Exact match, with or without the space, any case. The segment must look like a postcode ' +
         '(5 to 8 letters, digits and spaces, containing a digit); anything else is an unknown route.',
       responses: {
-        200: jsonResponse('The postcode', ResultSchema, cacheHeader),
+        200: jsonResponse('The postcode', LookupResponseSchema, cacheHeader),
         400: jsonResponse('Malformed postcode', ErrorSchema),
         404: jsonResponse('Unknown postcode', ErrorSchema),
         503: jsonResponse('Index not loaded yet', ErrorSchema),
@@ -145,19 +167,19 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
     validator('param', LookupParamSchema, badRequest),
     (c) => {
       const index = holder.current;
-      if (index === null) return c.json({ error: 'not_ready' as const }, 503);
+      if (index === null) return c.json(errorBody('not_ready', 'index not loaded yet'), 503);
       const { postcode } = c.req.valid('param');
-      const result = index.lookup(postcode);
+      const data = index.lookup(postcode);
       c.header('Cache-Control', cacheControl);
-      if (result === null) return c.json({ error: 'not_found' as const }, 404);
-      return c.json(result, 200);
+      if (data === null) return c.json(errorBody('not_found', 'unknown postcode'), 404);
+      return c.json({ data }, 200);
     },
   );
 
-  app.notFound((c) => c.json({ error: 'not_found' as const, message: `no route for ${c.req.method} ${c.req.path}` }, 404));
+  app.notFound((c) => c.json(errorBody('not_found', `no route for ${c.req.method} ${c.req.path}`), 404));
   app.onError((err, c) => {
     logger.error('unhandled error', { requestId: c.get('requestId'), error: err.message, stack: err.stack });
-    return c.json({ error: 'internal' }, 500);
+    return c.json(errorBody('internal', 'internal error'), 500);
   });
 
   return app;

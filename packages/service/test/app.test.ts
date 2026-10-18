@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { IndexHolder } from '../src/holder.js';
 import { silentLogger } from '../src/logger.js';
-import { ErrorSchema, HealthSchema } from '../src/schemas.js';
+import { ErrorSchema, HealthResponseSchema } from '../src/schemas.js';
 import { fixtureBytes, testConfig } from './helpers.js';
 
 function loadedHolder(): IndexHolder {
@@ -24,7 +24,7 @@ describe('/health', () => {
     const app = createApp(holder, testConfig(), silentLogger);
     const before = await app.request('/health');
     expect(before.status).toBe(503);
-    const bodyBefore = HealthSchema.parse(await before.json());
+    const bodyBefore = HealthResponseSchema.parse(await before.json()).data;
     expect(bodyBefore).toMatchObject({ status: 'starting', ready: false, index: null });
 
     holder.swap(PostcodeIndex.fromBytes(fixtureBytes()), {
@@ -36,7 +36,7 @@ describe('/health', () => {
     const after = await app.request('/health');
     expect(after.status).toBe(200);
     expect(after.headers.get('cache-control')).toBe('no-store');
-    const body = HealthSchema.parse(await after.json());
+    const body = HealthResponseSchema.parse(await after.json()).data;
     expect(body).toMatchObject({
       status: 'ok',
       ready: true,
@@ -50,37 +50,38 @@ describe('/health', () => {
 describe('/search', () => {
   const app = createApp(loadedHolder(), testConfig(), silentLogger);
 
-  it('returns results with the space, coordinates and a cache header', async () => {
+  it('returns data with the space, coordinates and a cache header', async () => {
     const res = await app.request('/search?q=ze1%200a&limit=3');
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('public, max-age=3600');
     expect(res.headers.get('x-request-id')).toMatch(/[0-9a-f-]{36}/);
-    const body = (await res.json()) as { results: Array<{ postcode: string; lat: number; lon: number }> };
-    expect(body.results.length).toBe(3);
-    expect(body.results[0]).toEqual({ postcode: 'ZE1 0AA', lat: expect.any(Number), lon: expect.any(Number) });
-    expect(body.results[0].lat).toBeCloseTo(60.153231, 4);
+    const body = (await res.json()) as { data: Array<{ postcode: string; lat: number; lon: number }> };
+    expect(Object.keys(body)).toEqual(['data']);
+    expect(body.data.length).toBe(3);
+    expect(body.data[0]).toEqual({ postcode: 'ZE1 0AA', lat: expect.any(Number), lon: expect.any(Number) });
+    expect(body.data[0].lat).toBeCloseTo(60.153231, 4);
   });
 
   it('applies the default and maximum limits', async () => {
-    const def = (await (await app.request('/search?q=ZE')).json()) as { results: unknown[] };
-    expect(def.results.length).toBe(10);
-    const max = (await (await app.request('/search?q=ZE&limit=50')).json()) as { results: unknown[] };
-    expect(max.results.length).toBe(50);
+    const def = (await (await app.request('/search?q=ZE')).json()) as { data: unknown[] };
+    expect(def.data.length).toBe(10);
+    const max = (await (await app.request('/search?q=ZE&limit=50')).json()) as { data: unknown[] };
+    expect(max.data.length).toBe(50);
   });
 
   it('accepts input that only normalises to a valid query (leading, trailing and doubled spaces)', async () => {
     for (const q of ['%20ze1%200aa', 'ZE1%200AA%20', 'ze1%20%200aa', '%20%20ZE1%20%200AA%20%20']) {
       const res = await app.request(`/search?q=${q}`);
       expect(res.status, q).toBe(200);
-      const body = (await res.json()) as { results: Array<{ postcode: string }> };
-      expect(body.results.map((r) => r.postcode)).toEqual(['ZE1 0AA']);
+      const body = (await res.json()) as { data: Array<{ postcode: string }> };
+      expect(body.data.map((r) => r.postcode)).toEqual(['ZE1 0AA']);
     }
   });
 
   it('returns an empty list, not 404, when nothing matches', async () => {
     const res = await app.request('/search?q=SW1A');
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ results: [] });
+    expect(await res.json()).toEqual({ data: [] });
   });
 
   it('returns 400 in the documented shape for bad parameters', async () => {
@@ -88,9 +89,25 @@ describe('/search', () => {
       const res = await app.request(`/search?${qs}`);
       expect(res.status, qs).toBe(400);
       expect(res.headers.get('cache-control')).toBeNull();
-      const body = ErrorSchema.parse(await res.json());
-      expect(body.error).toBe('bad_request');
-      expect(body.issues!.length).toBeGreaterThan(0);
+      const raw = await res.json();
+      expect(Object.keys(raw as object)).toEqual(['error']);
+      const body = ErrorSchema.parse(raw);
+      expect(body.error.code).toBe('bad_request');
+      expect(body.error.issues!.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('reports validation issues in the Standard Schema shape with plain messages', async () => {
+    const res = await app.request('/search?q=&limit=99');
+    expect(res.status).toBe(400);
+    const body = ErrorSchema.parse(await res.json());
+    expect(body.error.issues).toEqual([
+      { message: 'q is required', path: ['q'] },
+      { message: 'limit must be at most 50', path: ['limit'] },
+    ]);
+    for (const issue of body.error.issues!) {
+      expect(Object.keys(issue).sort()).toEqual(['message', 'path']);
+      expect(issue.message).not.toMatch(/expected|Too (small|big)|invalid_type/i);
     }
   });
 
@@ -103,7 +120,7 @@ describe('/search', () => {
     const empty = createApp(new IndexHolder(), testConfig(), silentLogger);
     const res = await empty.request('/search?q=ZE');
     expect(res.status).toBe(503);
-    expect(ErrorSchema.parse(await res.json()).error).toBe('not_ready');
+    expect(ErrorSchema.parse(await res.json()).error).toEqual({ code: 'not_ready', message: 'index not loaded yet' });
   });
 });
 
@@ -115,21 +132,23 @@ describe('/{postcode}', () => {
       const res = await app.request(`/${p}`);
       expect(res.status, p).toBe(200);
       expect(res.headers.get('cache-control')).toBe('public, max-age=60');
-      expect(await res.json()).toEqual({ postcode: 'ZE1 0AA', lat: expect.any(Number), lon: expect.any(Number) });
+      expect(await res.json()).toEqual({ data: { postcode: 'ZE1 0AA', lat: expect.any(Number), lon: expect.any(Number) } });
     }
   });
 
   it('returns 404 in the documented shape for an unknown postcode', async () => {
     const res = await app.request('/ZE1%200ZZ');
     expect(res.status).toBe(404);
-    expect(ErrorSchema.parse(await res.json())).toEqual({ error: 'not_found' });
+    expect(ErrorSchema.parse(await res.json())).toEqual({ error: { code: 'not_found', message: 'unknown postcode' } });
   });
 
   it('returns 400 for a postcode-shaped segment that is not a complete postcode', async () => {
     for (const path of ['/ZE1%200', '/ZE1%200A', '/ZE10AAA', '/ZE1%200CA', '/1234567']) {
       const res = await app.request(path);
       expect(res.status, path).toBe(400);
-      expect(ErrorSchema.parse(await res.json()).error).toBe('bad_request');
+      const body = ErrorSchema.parse(await res.json());
+      expect(body.error.code).toBe('bad_request');
+      expect(body.error.issues![0].path).toEqual(['postcode']);
     }
   });
 
@@ -137,7 +156,7 @@ describe('/{postcode}', () => {
     for (const path of ['/nope', '/favicon.ico', '/robots.txt', '/metrics', '/healthz', '/ZE1', '/ZE1%200AAAA', '/postcodes/ZE1%200AA']) {
       const res = await app.request(path);
       expect(res.status, path).toBe(404);
-      expect(ErrorSchema.parse(await res.json()).error).toBe('not_found');
+      expect(ErrorSchema.parse(await res.json()).error.code).toBe('not_found');
     }
   });
 
@@ -162,9 +181,11 @@ describe('/openapi.json', () => {
     expect(auto.responses['200'].headers['Cache-Control']).toBeDefined();
     const lookup = spec.paths['/{postcode}'].get;
     expect(Object.keys(lookup.responses).sort()).toEqual(['200', '400', '404', '503']);
-    expect(spec.components.schemas).toHaveProperty('Result');
-    expect(spec.components.schemas).toHaveProperty('Error');
-    expect(spec.components.schemas.Error.properties.error.enum).toEqual(['bad_request', 'not_found', 'not_ready']);
+    for (const name of ['Result', 'SearchResponse', 'LookupResponse', 'HealthResponse', 'Error', 'Issue']) {
+      expect(spec.components.schemas, name).toHaveProperty(name);
+    }
+    expect(spec.components.schemas.SearchResponse.required).toEqual(['data']);
+    expect(spec.components.schemas.Error.properties.error.properties.code.enum).toEqual(['bad_request', 'not_found', 'not_ready', 'internal']);
     const qParam = auto.parameters.find((p: { name: string }) => p.name === 'q');
     expect(qParam).toMatchObject({ in: 'query', required: true, schema: { type: 'string', minLength: 1, maxLength: 16 } });
 
