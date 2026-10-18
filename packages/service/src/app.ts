@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { conditionalGet } from './etag.js';
 import type { ServiceConfig } from './config.js';
 import type { IndexHolder } from './holder.js';
 import type { Logger } from './logger.js';
@@ -59,7 +60,11 @@ function badRequest(result: ValidationResult, c: { json: (body: unknown, status:
 export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Logger): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   const cacheControl = `public, max-age=${config.cacheMaxAgeSeconds}`;
-  const cacheHeader = { 'Cache-Control': { description: 'Results change at most quarterly', schema: { type: 'string' as const } } };
+  const cacheHeader = {
+    'Cache-Control': { description: 'Results change at most quarterly', schema: { type: 'string' as const } },
+    ETag: { description: 'Checksum of the loaded index; send it back in If-None-Match to get a 304 until the data changes', schema: { type: 'string' as const } },
+  };
+  const conditional = conditionalGet(holder, cacheControl);
 
   app.use(requestLogging(logger, OPS_PATHS));
   // Browsers call this API directly from autocomplete widgets, so CORS is on
@@ -85,11 +90,13 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
         'Returns an empty list rather than 404 when nothing matches.',
       responses: {
         200: jsonResponse('Matching postcodes', SearchResponseSchema, cacheHeader),
+        304: { description: 'Not modified: If-None-Match matched the current index ETag' },
         400: jsonResponse('Invalid query parameters', ErrorSchema),
         503: jsonResponse('Index not loaded yet', ErrorSchema),
       },
     }),
     validator('query', autocompleteQuerySchema(config.searchDefaultLimit, config.searchMaxLimit), badRequest),
+    conditional,
     (c) => {
       const index = holder.current;
       if (index === null) return c.json(errorBody('not_ready', 'index not loaded yet'), 503);
@@ -174,12 +181,14 @@ export function createApp(holder: IndexHolder, config: ServiceConfig, logger: Lo
         '(5 to 8 letters, digits and spaces, containing a digit); anything else is an unknown route.',
       responses: {
         200: jsonResponse('The postcode', LookupResponseSchema, cacheHeader),
+        304: { description: 'Not modified: If-None-Match matched the current index ETag' },
         400: jsonResponse('Malformed postcode', ErrorSchema),
-        404: jsonResponse('Unknown postcode', ErrorSchema),
+        404: jsonResponse('Unknown postcode', ErrorSchema, cacheHeader),
         503: jsonResponse('Index not loaded yet', ErrorSchema),
       },
     }),
     validator('param', LookupParamSchema, badRequest),
+    conditional,
     (c) => {
       const index = holder.current;
       if (index === null) return c.json(errorBody('not_ready', 'index not loaded yet'), 503);

@@ -17,3 +17,4 @@ export { createLogger, silentLogger, type Logger, type LogFields } from './logge
 export { createRefresh, type RefreshController, type RefreshDeps } from './refresh.js';
 export { createShutdown, type ShutdownDeps } from './shutdown.js';
 export * from './schemas.js';
+export { conditionalGet, indexEtag, ifNoneMatchMatches } from './etag.js';

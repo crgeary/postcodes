@@ -115,6 +115,8 @@ Interactive documentation is at `/docs`; the OpenAPI 3.1 document is at `/openap
 
 The lookup route lives at the root, so it only matches segments that look like a postcode: 5 to 8 letters, digits and spaces including at least one digit. Anything else (`/favicon.ico`, `/metrics`) is an unknown route and gets the JSON 404. New literal routes must not be postcode-shaped; the existing ones (`/health`, `/openapi.json`, `/docs`) are registered first and are not.
 
+**Caching.** Search and lookup responses (including 404s for unknown postcodes) carry `Cache-Control: public, max-age=3600` and an `ETag`. The ETag is the checksum of the loaded index rather than a hash of the body: a response is a pure function of the URL and the index, so one validator serves every URL, a request with a matching `If-None-Match` is answered 304 before any search runs, and every cached response everywhere invalidates exactly when a new index is loaded.
+
 **CORS.** Browsers may call the API directly; every response carries `Access-Control-Allow-Origin` for the configured origins (any origin by default, since the data is public and the API is read-only) and preflight requests are answered with a one-day cache. Set `CORS_ORIGINS` to restrict it.
 
 **Response envelope.** Every successful response puts its payload under `data`: a list for search, an object for lookup and health. Every error puts its detail under `error`:

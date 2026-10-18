@@ -167,6 +167,59 @@ describe('/{postcode}', () => {
   });
 });
 
+describe('ETag and conditional requests', () => {
+  const holder = loadedHolder();
+  const app = createApp(holder, testConfig(), silentLogger);
+
+  it('search, lookup and unknown-postcode responses carry the index ETag; health and 400s do not', async () => {
+    const search = await app.request('/search?q=ZE1&limit=2');
+    const lookup = await app.request('/ZE1%200AA');
+    const missing = await app.request('/ZE1%200ZZ');
+    const etag = search.headers.get('etag')!;
+    expect(etag).toMatch(/^"[0-9a-f]{32}"$/);
+    expect(lookup.headers.get('etag')).toBe(etag);
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get('etag')).toBe(etag);
+    expect((await app.request('/health')).headers.get('etag')).toBeNull();
+    expect((await app.request('/search?q=')).headers.get('etag')).toBeNull();
+  });
+
+  it('answers 304 with no body when If-None-Match matches, keeping cache headers', async () => {
+    const first = await app.request('/search?q=ZE1&limit=2');
+    const etag = first.headers.get('etag')!;
+    for (const header of [etag, `W/${etag}`, `"other", ${etag}`, '*']) {
+      const res = await app.request('/search?q=ZE1&limit=2', { headers: { 'if-none-match': header } });
+      expect(res.status, header).toBe(304);
+      expect(await res.text()).toBe('');
+      expect(res.headers.get('etag')).toBe(etag);
+      expect(res.headers.get('cache-control')).toBe('public, max-age=3600');
+    }
+    const miss = await app.request('/search?q=ZE1&limit=2', { headers: { 'if-none-match': '"stale"' } });
+    expect(miss.status).toBe(200);
+    const notFound = await app.request('/ZE1%200ZZ', { headers: { 'if-none-match': etag } });
+    expect(notFound.status).toBe(304);
+  });
+
+  it('validation still wins over a matching If-None-Match', async () => {
+    const etag = (await app.request('/search?q=ZE1')).headers.get('etag')!;
+    const res = await app.request('/search?q=&limit=0', { headers: { 'if-none-match': etag } });
+    expect(res.status).toBe(400);
+  });
+
+  it('changes when the index is swapped', async () => {
+    const before = (await app.request('/search?q=ZE1')).headers.get('etag')!;
+    holder.swap(PostcodeIndex.fromBytes(fixtureBytes({ release: 'MAY_2026', dropFirst: 1 })), {
+      source: 'f',
+      sourceKind: 'file',
+      loadedAt: 'later',
+      fallback: false,
+    });
+    const after = await app.request('/search?q=ZE1', { headers: { 'if-none-match': before } });
+    expect(after.status).toBe(200);
+    expect(after.headers.get('etag')).not.toBe(before);
+  });
+});
+
 describe('CORS', () => {
   it('allows any origin by default and answers preflight', async () => {
     const app = createApp(loadedHolder(), testConfig(), silentLogger);
@@ -211,10 +264,11 @@ describe('/openapi.json', () => {
     expect(spec.paths['/health'].get.operationId).toBe('getHealth');
     const ids = Object.values(spec.paths).flatMap((p: any) => Object.values(p).map((op: any) => op.operationId));
     expect(new Set(ids).size).toBe(ids.length);
-    expect(Object.keys(auto.responses).sort()).toEqual(['200', '400', '503']);
+    expect(Object.keys(auto.responses).sort()).toEqual(['200', '304', '400', '503']);
     expect(auto.responses['200'].headers['Cache-Control']).toBeDefined();
+    expect(auto.responses['200'].headers['ETag']).toBeDefined();
     const lookup = spec.paths['/{postcode}'].get;
-    expect(Object.keys(lookup.responses).sort()).toEqual(['200', '400', '404', '503']);
+    expect(Object.keys(lookup.responses).sort()).toEqual(['200', '304', '400', '404', '503']);
     for (const name of ['Result', 'SearchResponse', 'LookupResponse', 'HealthResponse', 'Error', 'Issue']) {
       expect(spec.components.schemas, name).toHaveProperty(name);
     }

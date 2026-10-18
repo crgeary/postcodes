@@ -61,6 +61,8 @@ With `POSTCODE_INDEX_REFRESH_MS` above zero the service sleeps `interval Ã— (1 Â
 
 For a few seconds during a swap both indexes exist, so peak memory is about twice the index size.
 
+Every search and lookup response carries an `ETag` equal to the index checksum, so after a swap the next conditional request from any client or CDN gets fresh data; nothing needs purging.
+
 To publish a new index for fetched mode, upload the file to the index host with a new `ETag` (any static host that supports conditional requests is enough) and wait for the next cycle, or restart one instance to pick it up immediately.
 
 ## Quarterly ONSPD update
