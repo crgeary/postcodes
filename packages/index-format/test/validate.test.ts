@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHECKSUM_OFFSET,
+  checksumHex,
+  computeChecksum,
+  storedChecksum,
   FORMAT_VERSION,
   HEADER_SIZE,
   IndexFormatError,
@@ -61,6 +64,15 @@ describe('validation', () => {
     const b = copy(buffer);
     new DataView(b).setUint32(8, 4, true); // districtCount
     expect(() => PostcodeIndex.fromBuffer(b)).toThrow(/layout/);
+  });
+
+  it('checksum matches an independent SHA-256 of the body', async () => {
+    const { createHash } = await import('node:crypto');
+    const expected = createHash('sha256').update(new Uint8Array(buffer, HEADER_SIZE)).digest('hex');
+    expect(checksumHex(computeChecksum(buffer))).toBe(expected);
+    expect(checksumHex(storedChecksum(buffer))).toBe(expected);
+    expect(computeChecksum(buffer).byteOffset).toBe(0);
+    expect(computeChecksum(buffer).length).toBe(32);
   });
 
   it('opens from a Buffer with a non-zero byteOffset', () => {

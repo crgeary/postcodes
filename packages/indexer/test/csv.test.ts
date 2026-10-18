@@ -65,4 +65,15 @@ describe('streaming reader', () => {
       for await (const _ of readOnspd(path)) void _;
     }).rejects.toThrow(/fewer than the header/);
   });
+
+  it('rejects a row that stops just before the last required column, whichever it is', async () => {
+    const dir = tempDir();
+    // lat is the final column here; a row with every field but lat must fail loudly,
+    // not be read as a postcode without coordinates.
+    const path = writeCsv(dir, 'a.csv', ['"AB1 0AA","","E92000001",-0.1'], 'pcds,doterm,ctry25cd,long,lat');
+    await expect(async () => {
+      for await (const _ of readOnspd(path)) void _;
+    }).rejects.toThrow(/4 fields, fewer than the header/);
+    expect(locateColumns('pcds,doterm,ctry25cd,long,lat').maxIndex).toBe(4);
+  });
 });

@@ -4,7 +4,9 @@ import { CHECKSUM_BYTES, CHECKSUM_OFFSET, HEADER_SIZE } from './constants.js';
 /** SHA-256 of everything after the header. */
 export function computeChecksum(buffer: ArrayBuffer): Uint8Array {
   const body = new Uint8Array(buffer, HEADER_SIZE, buffer.byteLength - HEADER_SIZE);
-  return new Uint8Array(createHash('sha256').update(body).digest().buffer, 0, CHECKSUM_BYTES);
+  const digest = createHash('sha256').update(body).digest();
+  // Respect byteOffset: a Buffer may be a view into a larger pooled buffer.
+  return new Uint8Array(digest.buffer, digest.byteOffset, CHECKSUM_BYTES).slice();
 }
 
 /** Read the checksum stored in the header. */

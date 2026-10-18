@@ -9,6 +9,8 @@ export interface OnspdColumns {
   long: number;
   ctry: number;
   ctryName: string;
+  /** Highest index among the located columns; a row must have more fields than this. */
+  maxIndex: number;
 }
 
 export interface OnspdRow {
@@ -57,13 +59,17 @@ export function locateColumns(headerLine: string): OnspdColumns {
   if (ctryIdx < 0) {
     throw new OnspdFormatError('required column matching ctry\\d{2}cd not found in header');
   }
-  return {
+  const columns = {
     pcds: find('pcds'),
     doterm: find('doterm'),
     lat: find('lat'),
     long: find('long'),
     ctry: ctryIdx,
+  };
+  return {
+    ...columns,
     ctryName: names[ctryIdx],
+    maxIndex: Math.max(columns.pcds, columns.doterm, columns.lat, columns.long, columns.ctry),
   };
 }
 
@@ -86,7 +92,7 @@ export async function* readOnspd(path: string): AsyncGenerator<OnspdRow, OnspdCo
     }
     if (line.length === 0) continue;
     const f = splitLine(line);
-    if (f.length <= columns.ctry || f.length <= columns.long || f.length <= columns.pcds) {
+    if (f.length <= columns.maxIndex) {
       throw new OnspdFormatError(`${path}:${lineNo}: row has ${f.length} fields, fewer than the header`);
     }
     yield {
