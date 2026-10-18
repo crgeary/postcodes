@@ -6,10 +6,16 @@ const CODE_Z = 90;
 const CODE_a = 97;
 const CODE_z = 122;
 
+const OUTWARD_MIN = 2;
+const OUTWARD_MAX = 4;
+
 /**
  * Uppercase; keep only A-Z, 0-9 and space; collapse runs of spaces; drop a
- * leading space. A trailing space is kept because it is meaningful: `SW1 `
- * means "all of SW1", whereas `SW1` also matches SW10, SW11, ...
+ * leading space. A trailing space is kept only when it can be the
+ * outward/inward separator, i.e. the text before it has no space and is a
+ * plausible outward (2 to 4 characters): `SW1 ` means "all of SW1", whereas
+ * `SW1` also matches SW10, SW11, ... Anywhere else (`SW1A 1 `, `SW1A1AA `)
+ * a trailing space is noise from typing and is dropped.
  */
 export function normaliseQuery(input: string): string {
   let out = '';
@@ -28,7 +34,9 @@ export function normaliseQuery(input: string): string {
     }
     // every other character is dropped
   }
-  if (pendingSpace) out += ' ';
+  if (pendingSpace && out.length >= OUTWARD_MIN && out.length <= OUTWARD_MAX && out.indexOf(' ') < 0) {
+    out += ' ';
+  }
   return out;
 }
 

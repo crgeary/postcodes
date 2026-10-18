@@ -68,6 +68,15 @@ describe('/postcodes/autocomplete', () => {
     expect(max.results.length).toBe(50);
   });
 
+  it('accepts input that only normalises to a valid query (leading, trailing and doubled spaces)', async () => {
+    for (const q of ['%20ze1%200aa', 'ZE1%200AA%20', 'ze1%20%200aa', '%20%20ZE1%20%200AA%20%20']) {
+      const res = await app.request(`/postcodes/autocomplete?q=${q}`);
+      expect(res.status, q).toBe(200);
+      const body = (await res.json()) as { results: Array<{ postcode: string }> };
+      expect(body.results.map((r) => r.postcode)).toEqual(['ZE1 0AA']);
+    }
+  });
+
   it('returns an empty list, not 404, when nothing matches', async () => {
     const res = await app.request('/postcodes/autocomplete?q=SW1A');
     expect(res.status).toBe(200);
@@ -75,7 +84,7 @@ describe('/postcodes/autocomplete', () => {
   });
 
   it('returns 400 in the documented shape for bad parameters', async () => {
-    for (const qs of ['', 'q=', 'q=ZE1%200AA%200', 'q=ZE&limit=0', 'q=ZE&limit=51', 'q=ZE&limit=abc', 'q=ZE&limit=1.5']) {
+    for (const qs of ['', 'q=', 'q=%20%20', 'q=---', 'q=ZE1%200AA%200', 'q=ZE1%200AA%200AA%200AA', 'q=ZE&limit=0', 'q=ZE&limit=51', 'q=ZE&limit=abc', 'q=ZE&limit=1.5']) {
       const res = await app.request(`/postcodes/autocomplete?${qs}`);
       expect(res.status, qs).toBe(400);
       expect(res.headers.get('cache-control')).toBeNull();
@@ -147,7 +156,7 @@ describe('/openapi.json', () => {
     expect(spec.components.schemas).toHaveProperty('Error');
     expect(spec.components.schemas.Error.properties.error.enum).toEqual(['bad_request', 'not_found', 'not_ready']);
     const qParam = auto.parameters.find((p: { name: string }) => p.name === 'q');
-    expect(qParam).toMatchObject({ in: 'query', required: true, schema: { type: 'string', minLength: 1, maxLength: 8 } });
+    expect(qParam).toMatchObject({ in: 'query', required: true, schema: { type: 'string', minLength: 1, maxLength: 16 } });
 
     // Validate the document against the OpenAPI 3.1 schema.
     await expect(SwaggerParser.validate(structuredClone(spec))).resolves.toBeDefined();

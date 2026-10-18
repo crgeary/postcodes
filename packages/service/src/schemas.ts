@@ -1,4 +1,4 @@
-import { MAX_QUERY_LENGTH } from '@postcode/index-format';
+import { MAX_QUERY_LENGTH, normaliseQuery } from '@postcode/index-format';
 import { z } from 'zod';
 
 export const ResultSchema = z
@@ -19,9 +19,29 @@ export const ErrorSchema = z
   })
   .meta({ id: 'Error' });
 
+/** Raw length cap before normalisation; a cheap guard against junk input. */
+export const MAX_RAW_QUERY_LENGTH = MAX_QUERY_LENGTH * 2;
+
 export function autocompleteQuerySchema(defaultLimit: number, maxLimit: number) {
   return z.object({
-    q: z.string().min(1).max(MAX_QUERY_LENGTH).meta({ description: 'Postcode prefix, 1 to 8 characters, case-insensitive, space optional', example: 'SW1A 1' }),
+    q: z
+      .string()
+      .trim()
+      .min(1)
+      .max(MAX_RAW_QUERY_LENGTH)
+      .refine(
+        (s) => {
+          const n = normaliseQuery(s).length;
+          return n >= 1 && n <= MAX_QUERY_LENGTH;
+        },
+        { message: `must contain 1 to ${MAX_QUERY_LENGTH} letters and digits after normalisation` },
+      )
+      .meta({
+        description:
+          `Postcode prefix, case-insensitive, space optional. Punctuation and repeated spaces are ignored; ` +
+          `what remains must be 1 to ${MAX_QUERY_LENGTH} characters.`,
+        example: 'SW1A 1',
+      }),
     limit: z.coerce
       .number()
       .int()

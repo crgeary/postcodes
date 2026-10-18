@@ -74,6 +74,24 @@ describe('search() against brute force', () => {
     expect(z.every((p) => p.startsWith('ZE1 '))).toBe(true);
   });
 
+  it('ignores a trailing space after the inward part or after a no-space postcode', () => {
+    expect(index.search('ZE1 0AA ', 5).map((r) => r.postcode)).toEqual(['ZE1 0AA']);
+    expect(index.search('ZE1 0 ', BIG).map((r) => r.postcode)).toEqual(index.search('ZE1 0', BIG).map((r) => r.postcode));
+    expect(index.search('ZE10AA ', 5).map((r) => r.postcode)).toEqual(['ZE1 0AA']);
+    expect(index.search('ZE10 ', BIG).map((r) => r.postcode)).toEqual(index.search('ZE10', BIG).map((r) => r.postcode));
+    // A trailing space after a plausible outward still means "all of that district".
+    expect(index.search('ZE1 ', BIG).map((r) => r.postcode)).toEqual(bruteForce('ZE1 '));
+    expect(index.search('Z ', BIG).map((r) => r.postcode)).toEqual(index.search('Z', BIG).map((r) => r.postcode));
+  });
+
+  it('clamps absurd limits instead of wrapping them', () => {
+    const all = index.search('ZE', BIG).length;
+    expect(index.search('ZE', 2 ** 31).length).toBe(all);
+    expect(index.search('ZE', 2 ** 32 + 5).length).toBe(all);
+    expect(index.search('ZE', Infinity).length).toBe(all);
+    expect(index.search('ZE', 2.9).length).toBe(2);
+  });
+
   it('handles messy input: case, punctuation, extra spaces', () => {
     expect(index.search('ze1 0aa', 5)[0].postcode).toBe('ZE1 0AA');
     expect(index.search('  ze1   0a', 500).map((r) => r.postcode)).toEqual(
@@ -126,10 +144,14 @@ describe('lookup()', () => {
 });
 
 describe('normaliseQuery()', () => {
-  it('uppercases, strips punctuation, collapses spaces, keeps a trailing space', () => {
-    expect(normaliseQuery('  sw1a   1aa ')).toBe('SW1A 1AA ');
+  it('uppercases, strips punctuation, collapses spaces, keeps only a separator-like trailing space', () => {
+    expect(normaliseQuery('  sw1a   1aa ')).toBe('SW1A 1AA');
     expect(normaliseQuery('sw1a-1aa')).toBe('SW1A1AA');
     expect(normaliseQuery('   ')).toBe('');
     expect(normaliseQuery('ze1 ')).toBe('ZE1 ');
+    expect(normaliseQuery('sw1a ')).toBe('SW1A ');
+    expect(normaliseQuery('sw1a1 ')).toBe('SW1A1');
+    expect(normaliseQuery('sw1a 1 ')).toBe('SW1A 1');
+    expect(normaliseQuery('b ')).toBe('B');
   });
 });

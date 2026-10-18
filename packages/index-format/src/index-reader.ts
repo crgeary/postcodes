@@ -133,7 +133,9 @@ export class PostcodeIndex {
   search(input: string, limit: number): PostcodeResult[] {
     const out: PostcodeResult[] = [];
     if (!(limit > 0)) return out;
-    limit = limit | 0;
+    // Clamp rather than `| 0`, which wraps values of 2^31 or more.
+    limit = Math.min(Math.floor(limit), this.postcodeCount);
+    if (limit === 0) return out;
     const q = normaliseQuery(input);
     if (q.length === 0 || q.length > MAX_QUERY_LENGTH) return out;
 
@@ -250,9 +252,15 @@ export class PostcodeIndex {
     const sp = q.indexOf(' ');
     if (sp >= 0) {
       const d = this.findOutward(q.slice(0, sp));
-      if (d >= 0 && inwardPrefixRange(q.slice(sp + 1), RANGE)) {
-        candidates.push({ dLo: d, dHi: d + 1, lo: RANGE[0], hi: RANGE[1], group: 0 });
+      if (d >= 0) {
+        if (inwardPrefixRange(q.slice(sp + 1), RANGE)) {
+          candidates.push({ dLo: d, dHi: d + 1, lo: RANGE[0], hi: RANGE[1], group: 0 });
+        }
+        return candidates;
       }
+      // `ZE10 `: the text before a trailing space is not a district, so the
+      // space was typing noise rather than the separator. Retry without it.
+      if (sp === q.length - 1) return this.collectCandidates(q.slice(0, sp));
       return candidates;
     }
     if (q.length <= OUTWARD_MAX_LENGTH) {
