@@ -26,11 +26,48 @@ Download an ONSPD release (the single UK file, or the per-area files under `mult
 pnpm index build -o packages/service/data/postcodes.idx /path/to/ONSPD_FEB_2026_UK.csv
 ```
 
-Run these from the repository root; relative paths resolve against your current directory, and the output directory is created if missing. Flags: `--exclude-ni`, `--exclude-crown-dependencies`, `--gb-only`, `--release FEB_2026`, `--precision-threshold 5`. The build prints a report (counts, file size, ten worst districts by coordinate precision) and exits non-zero if any district exceeds the precision threshold, which usually means an outlier coordinate. Verify any index before deploying it:
+Run these from the repository root; relative paths resolve against your current directory, and the output directory is created if missing. Flags: `--exclude-ni`, `--exclude-crown-dependencies`, `--gb-only`, `--release FEB_2026`, `--precision-threshold 5`. The build prints a report (counts, file size, ten worst districts by coordinate precision) and exits non-zero if any district exceeds the precision threshold, which usually means an outlier coordinate (see below). Verify any index before deploying it:
 
 ```bash
 pnpm index inspect packages/service/data/postcodes.idx
 ```
+
+### Coordinate precision and the threshold
+
+Coordinates are not stored as floats. Each district has a bounding box (`minLat`, `minLon`, `latSpan`, `lonSpan`), and every postcode inside it stores its position as two 16-bit integers: how far across the box it sits in 65,534 equal steps. Decoding gives back `min + step × span / 65534`. The size of one step is therefore the worst-case error for that district:
+
+```
+precision (m) = max(latSpan × 111 000, lonSpan × 111 000 × cos(midLat)) / 65 534
+```
+
+A compact urban district spans a few hundred metres and quantises to centimetres; a district covering a whole island group spans a degree or more and quantises to about two metres. The build report prints the ten worst districts and `inspect` prints the same figures for an existing file; `/health` reports the worst value as `worstPrecisionM`.
+
+**What the threshold does.** `--precision-threshold <metres>` (default 5) is an alert level, not a storage setting. It changes nothing in the file. After building, every district's precision is compared with it; any district above it is listed on an `ALERT` line and the command exits with status 1, so a CI job or release script stops. The index is still written and still valid, and the threshold used is recorded in the metadata so `inspect` applies the same one by default (pass `--precision-threshold` to `inspect` to re-check with another value).
+
+**Why it exists.** One wrong coordinate in a district (an ONSPD row placed hundreds of kilometres away) widens that district's bounding box and degrades the precision of every other postcode in it. Nothing else in the pipeline would notice. A district that suddenly exceeds the threshold between releases is the signal to look at its source rows before publishing the index.
+
+**Levels, measured on ONSPD FEB_2026 (2,977 districts, full UK).**
+
+| Precision | Districts | What it means |
+| --- | --- | --- |
+| up to 0.1 m | 1,305 (44%) | Dense urban districts. Error is far below the accuracy of the source grid reference. |
+| up to 0.25 m | 2,432 (82%) | Typical towns and suburbs. |
+| up to 0.5 m | 2,904 (98%) | Market towns with a rural hinterland. |
+| up to 1 m | 2,973 | Large rural districts such as DG7, DG8 and DL8. |
+| up to 2.2 m | 2,977 (all) | The handful of districts covering whole island groups or Highland areas: ZE2, PH33, IV27, KW17 and KW14. |
+
+The median district is 0.116 m, the postcode-weighted mean is 0.17 m, and nothing exceeds 2.17 m. ONSPD grid references are themselves given to 1 m, so no district loses meaningful accuracy at these levels.
+
+**Choosing a value.**
+
+| Threshold | Use |
+| --- | --- |
+| 5 m (default) | Passes every genuine district with room to spare; only an outlier coordinate trips it. Recommended. |
+| 3 m | Tighter guard that still passes the current data; trips sooner if a large rural district grows. |
+| 1 m | Strict. Fails the five largest districts in the current data, so only useful for GB-only or regional builds where none of them is present. |
+| above 5 m | Loosens the guard; a real outlier can slip through and quietly degrade a whole district. Not recommended. |
+
+If the alert fires on a district that is genuinely large rather than corrupt, raising the threshold is the right response. If the error budget ever matters more than file size, the format can move to 12-bit or 8-bit coordinates per the plan, which trades bytes for metres uniformly rather than per district.
 
 ## Run the service
 
