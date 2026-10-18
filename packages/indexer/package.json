@@ -1,0 +1,26 @@
+{
+  "name": "@postcode/indexer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CLI that turns ONSPD CSV releases into a postcode index file",
+  "type": "module",
+  "bin": {
+    "postcode-index": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "dev": "node --conditions=development --import tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@postcode/index-format": "workspace:*"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
