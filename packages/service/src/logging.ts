@@ -16,9 +16,8 @@ export function requestLogging(logger: Logger, hotPathPrefix = '/postcodes/'): M
     await next();
     c.header('x-request-id', requestId);
     const path = c.req.path;
-    const hot = path.startsWith(hotPathPrefix);
-    const level = hot ? 'debug' : 'info';
-    if (level === 'debug' && logger.level !== 'debug') return;
+    const level = path.startsWith(hotPathPrefix) ? 'debug' : 'info';
+    if (!logger.enabled(level)) return; // skip building fields for lines that would be dropped
     logger[level]('request', {
       requestId,
       method: c.req.method,
